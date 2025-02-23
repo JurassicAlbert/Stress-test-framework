@@ -1,4 +1,4 @@
-// Retrieve data from the pipeline using Cypress.env.
+// Retrieve data from the pipeline using Cypress.env
 // If not set, default values are used.
 const numTests = Cypress.env("NUM_TESTS") || 1;
 const validUsername = Cypress.env("LOGIN") || "student";
@@ -25,20 +25,27 @@ describe('Practice Test Automation - Login Test', () => {
         cy.contains('Log out').click();
         cy.url().should('include', '/practice-test-login/');
       } else {
-        // Negative scenario: Expect that login does not occur
-        cy.url().should('not.include', 'logged-in-successfully').then(() => {
-          // Verify the appropriate error message:
-          if (validUsername !== "student") {
-            cy.get('#error')
-              .should('be.visible')
-              .and('contain', 'Your username is invalid!');
+        // Negative scenario: We expect that login does NOT occur
+        cy.url().then(url => {
+          if (url.includes('logged-in-successfully')) {
+            // If login unexpectedly occurs, we consider it a real error => fail the test
+            cy.contains('Log out').should('be.visible').click();
+            cy.url().should('include', '/practice-test-login/');
+            throw new Error("Test FAILED: Unexpected login with invalid credentials");
           } else {
-            cy.get('#error')
-              .should('be.visible')
-              .and('contain', 'Your password is invalid!');
+            // If login did not succeed, verify the correct error message is displayed
+            if (validUsername !== "student") {
+              cy.get('#error')
+                .should('be.visible')
+                .and('contain', 'Your username is invalid!');
+            } else {
+              cy.get('#error')
+                .should('be.visible')
+                .and('contain', 'Your password is invalid!');
+            }
+            // We do NOT force a failure here; negative scenario is expected => test passes
+            cy.log("Negative scenario test passed: login blocked, error message displayed.");
           }
-          // Force test failure using an assertion.
-          expect(false, 'Login should not succeed with invalid credentials').to.be.true;
         });
       }
     });
