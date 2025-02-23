@@ -1,4 +1,4 @@
-// Retrieve data from the pipeline using Cypress.env
+// Retrieve data from the pipeline using Cypress.env.
 // If not set, default values are used.
 const numTests = Cypress.env("NUM_TESTS") || 1;
 const validUsername = Cypress.env("LOGIN") || "student";
@@ -37,7 +37,7 @@ describe('Practice Test Automation - Login Test', () => {
               .should('be.visible')
               .and('contain', 'Your password is invalid!');
           }
-          // Force a test failure using an assertion. This failure will be recorded by Cypress without breaking the pipeline.
+          // Force test failure using an assertion.
           expect(false, 'Login should not succeed with invalid credentials').to.be.true;
         });
       }

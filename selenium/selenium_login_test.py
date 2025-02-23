@@ -9,19 +9,17 @@ from selenium.webdriver.support import expected_conditions as EC
 from colorama import init, Fore, Style
 from prometheus_client import CollectorRegistry, Counter, push_to_gateway
 
-# Initialize colorama for colored terminal output
+# Inicjalizacja colorama
 init(autoreset=True)
 
-# Retrieve data from the pipeline or use default values
+# Zmienne środowiskowe
 NUM_TESTS = int(os.getenv("NUM_TESTS", 1))
 LOGIN = os.getenv("LOGIN", "student")
-# For the positive scenario, the password must be "Password123"
 PASSWORD = os.getenv("PASSWORD", "Password123")
 
-# Retrieve Pushgateway address from environment variable (default: localhost:9091)
 PUSHGATEWAY_ADDRESS = os.getenv("PUSHGATEWAY_ADDRESS", "localhost:9091")
 
-# Create a Prometheus registry and define counters
+# Tworzymy rejestr i liczniki
 registry = CollectorRegistry()
 TEST_SUCCESS_COUNTER = Counter(
     "selenium_login_test_success_total",
@@ -36,52 +34,40 @@ TEST_FAILURE_COUNTER = Counter(
 
 def push_metrics():
     """
-    Push the collected metrics to the Prometheus Pushgateway.
+    Wypychanie metryk do Pushgateway
     """
     push_to_gateway(PUSHGATEWAY_ADDRESS, job="selenium_login_test", registry=registry)
 
 def run_login_test(driver):
     """
-    Runs the login test for a given number of iterations.
-    For each iteration:
-      1. Opens the login page.
-      2. Enters the login credentials.
-      3. Depending on the provided credentials, verifies either a successful login
-         (positive scenario) or an unsuccessful login (negative scenario).
-    In the positive scenario, the test verifies redirection to the success page,
-    the presence of a success message and a visible 'Log out' button; then it logs out
-    and verifies the return to the login page.
-    In the negative scenario, the test records a failure.
-    After all iterations, the metrics are pushed to the Pushgateway.
+    Główny test logowania wykonywany NUM_TESTS razy.
     """
     wait = WebDriverWait(driver, 10)
-    failures = []  # List to record errors from individual iterations
+    failures = []
 
     for i in range(NUM_TESTS):
         print(f"Running test iteration {i + 1}")
         try:
-            # 1. Open the login page
             driver.get("https://practicetestautomation.com/practice-test-login/")
             wait.until(EC.presence_of_element_located((By.ID, "username")))
 
-            # 2. Enter login credentials
             driver.find_element(By.ID, "username").clear()
             driver.find_element(By.ID, "username").send_keys(LOGIN)
             driver.find_element(By.ID, "password").clear()
             driver.find_element(By.ID, "password").send_keys(PASSWORD)
             driver.find_element(By.ID, "submit").click()
-            time.sleep(2)  # Wait a moment for the action to process
+            time.sleep(2)
             current_url = driver.current_url
 
             if LOGIN == "student" and PASSWORD == "Password123":
-                # Positive scenario
+                # Pozytywny scenariusz
                 if "logged-in-successfully" not in current_url:
-                    failures.append(f"Iteration {i + 1}: Expected redirection, but received URL: {current_url}")
+                    failures.append(f"Iteration {i + 1}: Expected redirection, but got: {current_url}")
                     TEST_FAILURE_COUNTER.inc()
                 else:
                     page_source = driver.page_source
                     if not ("Logged In Successfully" in page_source or "Congratulations" in page_source):
-                        failures.append(f"Iteration {i + 1}: Missing success message upon login.")
+                        failures.append(f"Iteration {i + 1}: Missing success message.")
                         TEST_FAILURE_COUNTER.inc()
                     else:
                         try:
@@ -95,7 +81,7 @@ def run_login_test(driver):
                                 logout_button.click()
                                 time.sleep(2)
                                 if "practice-test-login" not in driver.current_url:
-                                    failures.append(f"Iteration {i + 1}: Failed to return to the login page after logout.")
+                                    failures.append(f"Iteration {i + 1}: Not back to login page after logout.")
                                     TEST_FAILURE_COUNTER.inc()
                                 else:
                                     print(f"Iteration {i + 1}: {Fore.GREEN}Positive test passed successfully.{Style.RESET_ALL}")
@@ -104,7 +90,7 @@ def run_login_test(driver):
                             failures.append(f"Iteration {i + 1}: Error during logout: {ex}")
                             TEST_FAILURE_COUNTER.inc()
             else:
-                # Negative scenario – invalid credentials: test should fail
+                # Negatywny scenariusz
                 if "logged-in-successfully" in current_url:
                     print(f"Iteration {i + 1}: {Fore.RED}ERROR: Logged in with invalid credentials. Logging out...{Style.RESET_ALL}")
                     try:
@@ -114,7 +100,7 @@ def run_login_test(driver):
                         logout_button.click()
                         time.sleep(2)
                     except Exception as ex:
-                        failures.append(f"Iteration {i + 1}: Error during logout: {ex}")
+                        failures.append(f"Iteration {i + 1}: Error during forced logout: {ex}")
                     failures.append(f"Iteration {i + 1}: TEST FAILED: Unexpected login with invalid credentials.")
                     TEST_FAILURE_COUNTER.inc()
                 else:
@@ -126,6 +112,7 @@ def run_login_test(driver):
                     else:
                         failures.append(f"Iteration {i + 1}: Unexpected error message: {error_text}")
                         TEST_FAILURE_COUNTER.inc()
+
         except Exception as e:
             print(f"Iteration {i + 1} - Test FAILED: {Fore.RED}{e}{Style.RESET_ALL}")
             failures.append(f"Iteration {i + 1}: {e}")
@@ -143,8 +130,7 @@ def run_login_test(driver):
 
 def main():
     """
-    Main function to initialize the Chrome driver in headless mode,
-    run the login test, and close the browser.
+    Uruchomienie testu w trybie headless
     """
     chrome_options = Options()
     chrome_options.add_argument("--headless")
