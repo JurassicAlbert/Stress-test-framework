@@ -13,7 +13,7 @@ from prometheus_client import CollectorRegistry, Counter, push_to_gateway
 init(autoreset=True)
 
 # Retrieve data from the pipeline or use default values
-NUM_TESTS = int(os.getenv("NUM_TESTS", 3))
+NUM_TESTS = int(os.getenv("NUM_TESTS", 1))
 LOGIN = os.getenv("LOGIN", "student")
 # For the positive scenario, the password must be "Password123"
 PASSWORD = os.getenv("PASSWORD", "Password123")

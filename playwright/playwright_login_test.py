@@ -4,7 +4,7 @@ from playwright.sync_api import sync_playwright
 from prometheus_client import CollectorRegistry, Counter, push_to_gateway
 
 # Retrieve data from the pipeline or use default values:
-NUM_TESTS = int(os.getenv("NUM_TESTS", 2))
+NUM_TESTS = int(os.getenv("NUM_TESTS", 1))
 USERNAME = os.getenv("LOGIN", "student")
 PASSWORD = os.getenv("PASSWORD", "Password123")  # Correct credentials: "student" / "Password123"
 

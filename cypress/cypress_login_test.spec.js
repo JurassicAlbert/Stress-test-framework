@@ -1,5 +1,3 @@
-// cypress/integration/login.spec.js
-
 // Retrieve data from the pipeline using Cypress.env
 // If not set, default values are used.
 const numTests = Cypress.env("NUM_TESTS") || 1;
