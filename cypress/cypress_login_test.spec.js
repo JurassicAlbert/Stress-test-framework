@@ -17,7 +17,7 @@ describe('Practice Test Automation - Login Test', () => {
 
       // 3. Depending on the provided credentials, expect either a successful or unsuccessful login result
       if (validUsername === "student" && validPassword === "Password123") {
-        // Expect a successful login:
+        // Positive scenario: Expect successful login
         cy.url().should('include', 'logged-in-successfully');
         cy.contains(/(Logged In Successfully|Congratulations)/).should('be.visible');
         cy.contains('Log out').should('be.visible');
@@ -25,26 +25,20 @@ describe('Practice Test Automation - Login Test', () => {
         cy.contains('Log out').click();
         cy.url().should('include', '/practice-test-login/');
       } else {
-        // Expect that login does not occur:
-        cy.url().then(url => {
-          if (url.includes('logged-in-successfully')) {
-            // If login unexpectedly occurs, perform logout and throw an error.
-            cy.contains('Log out').should('be.visible').click();
-            cy.url().should('include', '/practice-test-login/');
-            throw new Error("Test FAILED: Unexpected login with invalid credentials");
+        // Negative scenario: Expect that login does not occur
+        cy.url().should('not.include', 'logged-in-successfully').then(() => {
+          // Verify the appropriate error message:
+          if (validUsername !== "student") {
+            cy.get('#error')
+              .should('be.visible')
+              .and('contain', 'Your username is invalid!');
           } else {
-            // Verify the appropriate error message:
-            if (validUsername !== "student") {
-              cy.get('#error')
-                .should('be.visible')
-                .and('contain', 'Your username is invalid!');
-            } else {
-              cy.get('#error')
-                .should('be.visible')
-                .and('contain', 'Your password is invalid!');
-            }
-            throw new Error("Test FAILED:invalid credentials");
+            cy.get('#error')
+              .should('be.visible')
+              .and('contain', 'Your password is invalid!');
           }
+          // Force a test failure using an assertion. This failure will be recorded by Cypress without breaking the pipeline.
+          expect(false, 'Login should not succeed with invalid credentials').to.be.true;
         });
       }
     });
