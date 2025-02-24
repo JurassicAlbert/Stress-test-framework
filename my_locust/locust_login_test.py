@@ -1,5 +1,5 @@
 import os
-from locust import HttpUser, TaskSet, task, between, events
+from my_locust import HttpUser, TaskSet, task, between, events
 from prometheus_client import CollectorRegistry, Counter, push_to_gateway
 
 # Domyślny host i dane logowania (zaciągane z zmiennych środowiskowych)
