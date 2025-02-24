@@ -19,10 +19,10 @@ It always completes the test loop and pushes metrics.
 import os
 import time
 from playwright.sync_api import sync_playwright
-from prometheus_client import CollectorRegistry, Counter, push_to_gateway, collect_default_metrics
+from prometheus_client import CollectorRegistry, Counter, push_to_gateway
 from colorama import init
 
-# Initialize colorama (output colors are not used now since prints are removed)
+# Initialize colorama (minimal logging; no colored output is printed to speed up execution)
 init(autoreset=True)
 
 # Retrieve configuration from environment variables
@@ -31,9 +31,8 @@ LOGIN = os.getenv("LOGIN", "student")
 PASSWORD = os.getenv("PASSWORD", "Password123")  # Correct credentials: "student"/"Password123"
 PUSHGATEWAY_ADDRESS = os.getenv("PUSHGATEWAY_ADDRESS", "localhost:9091")
 
-# Set up Prometheus registry and default metrics
+# Set up Prometheus registry (do not collect default metrics)
 registry = CollectorRegistry()
-collect_default_metrics(registry=registry)
 
 # Define counters for test outcomes
 TEST_SUCCESS_COUNTER = Counter(
@@ -54,7 +53,6 @@ PERFORMANCE_POSITIVE_COUNTER = Counter(
     "Total number of positive tests that exceeded the expected duration threshold",
     registry=registry
 )
-
 # For negative tests: if a test either passes unexpectedly or runs too quickly (< 1000 ms)
 PERFORMANCE_NEGATIVE_COUNTER = Counter(
     "playwright_negative_performance_unexpected_pass_total",
@@ -66,11 +64,11 @@ PERFORMANCE_NEGATIVE_COUNTER = Counter(
 def push_metrics():
     """
     Push the collected metrics to the Prometheus Pushgateway.
+    Any push errors are silently ignored.
     """
     try:
         push_to_gateway(PUSHGATEWAY_ADDRESS, job="playwright_tests", registry=registry)
-    except Exception as e:
-        # Do not raise; log minimal error if desired.
+    except Exception:
         pass
 
 
@@ -148,7 +146,6 @@ def run_login_test():
         PERFORMANCE_POSITIVE_COUNTER.inc(positive_perf_issues)
         PERFORMANCE_NEGATIVE_COUNTER.inc(negative_perf_issues)
         overall_duration = time.time() * 1000 - overall_start
-        # Optionally, record overall_duration as a metric if needed.
         push_metrics()
         browser.close()
 
