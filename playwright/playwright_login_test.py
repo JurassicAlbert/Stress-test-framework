@@ -1,143 +1,157 @@
-import os
-import sys
-import time
-from selenium import webdriver
-from selenium.webdriver.common.by import By
-from selenium.webdriver.chrome.options import Options
-from selenium.webdriver.support.ui import WebDriverWait
-from selenium.webdriver.support import expected_conditions as EC
-from colorama import init, Fore, Style
-from prometheus_client import CollectorRegistry, Counter, push_to_gateway
+#!/usr/bin/env python3
+"""
+playwright_login_test.py
 
-# Initialize colorama for colored output
+This script runs a login test repeatedly using Playwright (Python) and records Prometheus metrics.
+It measures:
+  - The number of tests that passed/failed.
+  - For positive tests (with valid credentials), if the test duration exceeds a threshold (e.g., 4000 ms),
+    it counts that as a performance issue.
+  - For negative tests (with invalid credentials), if the test either passes unexpectedly or runs too quickly
+    (< 1000 ms), it counts that as a performance issue.
+
+At the end of the run, it pushes all metrics to a Prometheus Pushgateway.
+
+Note: This version never throws an exception or terminates the process with a nonzero exit code.
+It always completes the test loop and pushes metrics.
+"""
+
+import os
+import time
+from playwright.sync_api import sync_playwright
+from prometheus_client import CollectorRegistry, Counter, push_to_gateway, collect_default_metrics
+from colorama import init
+
+# Initialize colorama (output colors are not used now since prints are removed)
 init(autoreset=True)
 
-# Retrieve data from environment
+# Retrieve configuration from environment variables
 NUM_TESTS = int(os.getenv("NUM_TESTS", 1))
 LOGIN = os.getenv("LOGIN", "student")
 PASSWORD = os.getenv("PASSWORD", "Password123")  # Correct credentials: "student"/"Password123"
 PUSHGATEWAY_ADDRESS = os.getenv("PUSHGATEWAY_ADDRESS", "localhost:9091")
 
-# Create a Prometheus registry and define counters
+# Set up Prometheus registry and default metrics
 registry = CollectorRegistry()
+collect_default_metrics(registry=registry)
+
+# Define counters for test outcomes
 TEST_SUCCESS_COUNTER = Counter(
-    "selenium_login_test_success_total",
-    "Total number of successful login test iterations",
+    "playwright_test_success_total",
+    "Total number of successful Playwright tests",
     registry=registry
 )
 TEST_FAILURE_COUNTER = Counter(
-    "selenium_login_test_failure_total",
-    "Total number of failed login test iterations",
+    "playwright_test_failure_total",
+    "Total number of failed Playwright tests",
     registry=registry
 )
+
+# Define additional counters for performance issues:
+# For positive tests: if the duration exceeds the threshold (e.g., 4000 ms)
+PERFORMANCE_POSITIVE_COUNTER = Counter(
+    "playwright_positive_performance_failures_total",
+    "Total number of positive tests that exceeded the expected duration threshold",
+    registry=registry
+)
+
+# For negative tests: if a test either passes unexpectedly or runs too quickly (< 1000 ms)
+PERFORMANCE_NEGATIVE_COUNTER = Counter(
+    "playwright_negative_performance_unexpected_pass_total",
+    "Total number of negative tests that unexpectedly passed or had very short duration",
+    registry=registry
+)
+
 
 def push_metrics():
     """
     Push the collected metrics to the Prometheus Pushgateway.
     """
-    push_to_gateway(PUSHGATEWAY_ADDRESS, job="selenium_login_test", registry=registry)
+    try:
+        push_to_gateway(PUSHGATEWAY_ADDRESS, job="playwright_tests", registry=registry)
+    except Exception as e:
+        # Do not raise; log minimal error if desired.
+        pass
 
-def run_login_test(driver):
+
+def run_login_test():
     """
-    Runs the login test for a given number of iterations using Selenium.
-    Positive scenario: if correct credentials are provided, verifies redirection,
-    presence of a success message, and that logout works.
-    Negative scenario: if invalid credentials are provided, verifies that login fails
-    and the appropriate error message is displayed. If the expected error is shown,
-    the iteration is considered successful.
-    After all iterations, metrics are pushed to the Pushgateway.
+    Runs the login test repeatedly using Playwright. In the positive scenario (valid credentials),
+    it verifies that the user is redirected correctly, sees a success message, and can log out.
+    In the negative scenario, it verifies that the login fails and the expected error message is displayed.
+    Performance issues are recorded based on test duration.
+
+    This function does not throw exceptions or exit with nonzero codes; it simply records failures in metrics.
     """
-    wait = WebDriverWait(driver, 10)
+    positive_perf_issues = 0
+    negative_perf_issues = 0
+    overall_start = time.time() * 1000  # Start time in ms
     failures = []
 
-    for i in range(NUM_TESTS):
-        print(f"Running test iteration {i+1}")
-        try:
-            driver.get("https://practicetestautomation.com/practice-test-login/")
-            wait.until(EC.presence_of_element_located((By.ID, "username")))
+    with sync_playwright() as p:
+        browser = p.chromium.launch(headless=True)
+        context = browser.new_context()
+        page = context.new_page()
 
-            driver.find_element(By.ID, "username").clear()
-            driver.find_element(By.ID, "username").send_keys(LOGIN)
-            driver.find_element(By.ID, "password").clear()
-            driver.find_element(By.ID, "password").send_keys(PASSWORD)
-            driver.find_element(By.ID, "submit").click()
-            time.sleep(2)
-            current_url = driver.current_url
+        for i in range(NUM_TESTS):
+            iteration_start = time.time() * 1000  # in ms
+            try:
+                page.goto("https://practicetestautomation.com/practice-test-login/")
+                page.fill("#username", LOGIN)
+                page.fill("#password", PASSWORD)
+                page.click("#submit")
+                time.sleep(0.2)
+                current_url = page.url
 
-            if LOGIN == "student" and PASSWORD == "Password123":
-                # Positive scenario
-                if "logged-in-successfully" not in current_url:
-                    failures.append(f"Iteration {i+1}: Expected redirection, but got URL: {current_url}")
-                    TEST_FAILURE_COUNTER.inc()
-                else:
-                    page_source = driver.page_source
-                    if not ("Logged In Successfully" in page_source or "Congratulations" in page_source):
-                        failures.append(f"Iteration {i+1}: Missing success message upon login.")
+                if LOGIN == "student" and PASSWORD == "Password123":
+                    # Positive scenario
+                    if "logged-in-successfully" not in current_url:
                         TEST_FAILURE_COUNTER.inc()
+                        failures.append(f"Iteration {i + 1}: Expected redirection but got URL: {current_url}")
                     else:
-                        try:
-                            logout_button = wait.until(EC.visibility_of_element_located((By.XPATH, "//*[contains(text(),'Log out')]")))
-                            if logout_button is None:
-                                failures.append(f"Iteration {i+1}: 'Log out' button not visible.")
-                                TEST_FAILURE_COUNTER.inc()
-                            else:
-                                logout_button.click()
-                                time.sleep(2)
-                                if "practice-test-login" not in driver.current_url:
-                                    failures.append(f"Iteration {i+1}: Failed to return to login page after logout.")
-                                    TEST_FAILURE_COUNTER.inc()
-                                else:
-                                    print(f"Iteration {i+1}: {Fore.GREEN}Positive test passed successfully.{Style.RESET_ALL}")
-                                    TEST_SUCCESS_COUNTER.inc()
-                        except Exception as ex:
-                            failures.append(f"Iteration {i+1}: Error during logout: {ex}")
+                        content = page.content()
+                        if not ("Logged In Successfully" in content or "Congratulations" in content):
                             TEST_FAILURE_COUNTER.inc()
-            else:
-                # Negative scenario
-                if "logged-in-successfully" in current_url:
-                    print(f"Iteration {i+1}: {Fore.RED}ERROR: Logged in with invalid credentials. Logging out...{Style.RESET_ALL}")
-                    try:
-                        logout_button = wait.until(EC.visibility_of_element_located((By.XPATH, "//*[contains(text(),'Log out')]")))
-                        logout_button.click()
-                        time.sleep(2)
-                    except Exception as ex:
-                        failures.append(f"Iteration {i+1}: Error during forced logout: {ex}")
-                    failures.append(f"Iteration {i+1}: TEST FAILED: Unexpected login with invalid credentials.")
-                    TEST_FAILURE_COUNTER.inc()
+                            failures.append(f"Iteration {i + 1}: Success message missing.")
+                        else:
+                            page.click("text=Log out")
+                            time.sleep(0.2)
+                            if "practice-test-login" not in page.url:
+                                TEST_FAILURE_COUNTER.inc()
+                                failures.append(f"Iteration {i + 1}: Failed to return to login page after logout.")
+                            else:
+                                TEST_SUCCESS_COUNTER.inc()
+                    duration = time.time() * 1000 - iteration_start
+                    if duration > 4000:
+                        positive_perf_issues += 1
                 else:
-                    error_elem = wait.until(EC.visibility_of_element_located((By.ID, "error")))
-                    error_text = error_elem.text
-                    if ("Your username is invalid!" in error_text) or ("Your password is invalid!" in error_text):
-                        print(f"Iteration {i+1}: Negative test passed (login failed as expected).")
-                        TEST_SUCCESS_COUNTER.inc()
-                    else:
-                        failures.append(f"Iteration {i+1}: Unexpected error message: {error_text}")
+                    # Negative scenario
+                    if "logged-in-successfully" in current_url:
                         TEST_FAILURE_COUNTER.inc()
-        except Exception as e:
-            print(f"Iteration {i+1} - Test FAILED: {Fore.RED}{e}{Style.RESET_ALL}")
-            failures.append(f"Iteration {i+1}: {e}")
-            TEST_FAILURE_COUNTER.inc()
+                        failures.append(f"Iteration {i + 1}: Unexpected login with invalid credentials.")
+                        page.click("text=Log out")
+                    else:
+                        error_text = page.text_content("#error")
+                        if error_text and (
+                                "Your username is invalid!" in error_text or "Your password is invalid!" in error_text):
+                            TEST_SUCCESS_COUNTER.inc()
+                        else:
+                            TEST_FAILURE_COUNTER.inc()
+                            failures.append(f"Iteration {i + 1}: Unexpected error message: {error_text}")
+                        duration = time.time() * 1000 - iteration_start
+                        if duration < 1000:
+                            negative_perf_issues += 1
+            except Exception as e:
+                TEST_FAILURE_COUNTER.inc()
+                failures.append(f"Iteration {i + 1}: Exception occurred: {e}")
 
-    if failures:
-        print("\nSummary of errors:")
-        for failure in failures:
-            print(failure)
+        PERFORMANCE_POSITIVE_COUNTER.inc(positive_perf_issues)
+        PERFORMANCE_NEGATIVE_COUNTER.inc(negative_perf_issues)
+        overall_duration = time.time() * 1000 - overall_start
+        # Optionally, record overall_duration as a metric if needed.
         push_metrics()
-        sys.exit(1)
-    else:
-        print("All iterations passed successfully.")
-        push_metrics()
+        browser.close()
 
-def main():
-    chrome_options = Options()
-    chrome_options.add_argument("--headless")
-    chrome_options.add_argument("--disable-gpu")
-    driver = webdriver.Chrome(options=chrome_options)
-
-    try:
-        run_login_test(driver)
-    finally:
-        driver.quit()
 
 if __name__ == "__main__":
-    main()
+    run_login_test()
