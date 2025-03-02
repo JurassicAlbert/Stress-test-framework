@@ -33,7 +33,6 @@ testFailureCounter.inc(0);
 performancePositiveCounter.inc(0);
 performanceNegativeCounter.inc(0);
 
-// Upewnij się, że używasz Twojego rejestru podczas pushowania – przekazując go w opcji "registry"
 module.exports = (on, config) => {
     on('after:run', async (results) => {
         if (results) {
@@ -71,16 +70,16 @@ module.exports = (on, config) => {
             console.warn('Error fetching metrics data:', err);
         }
 
-        // Przekaż rejestr przy wywołaniu push
-        const pushOptions = { jobName: 'cypress_tests', registry: registry };
-        pushgateway.push(pushOptions, (err, resp, body) => {
+        // Używamy funkcji pushToGateway z własnym rejestrem
+        const {pushToGateway} = require('prom-client');
+        pushToGateway(pushgatewayAddress, 'cypress_tests', registry, (err, resp, body) => {
             if (err) {
-                console.error('Error pushing metrics at', new Date().toISOString(), err);
+                console.error('Error pushing metrics:', err);
             } else {
                 console.log('Successfully pushed metrics at', new Date().toISOString());
             }
         });
-    });
 
-    return config;
+        return config;
+    });
 };
