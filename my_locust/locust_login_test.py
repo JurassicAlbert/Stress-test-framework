@@ -120,12 +120,14 @@ class WebsiteUser(HttpUser):
 def push_metrics():
     """
     Push the collected metrics to the Prometheus Pushgateway.
-    Any push errors are silently ignored.
     """
     try:
-        push_to_gateway("localhost:9091", job="locust_tests", registry=registry)
-    except Exception:
-        pass
+        # Używamy pełnego adresu z protokołem
+        push_to_gateway("http://localhost:9091", job="locust_tests", registry=registry)
+        print("Metrics pushed successfully to Pushgateway")
+    except Exception as e:
+        print("Error pushing metrics to Pushgateway:", e)
+
 
 # Push metrics once at startup (for initialization purposes)
 push_metrics()

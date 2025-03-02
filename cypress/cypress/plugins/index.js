@@ -1,16 +1,15 @@
-// cypress/plugins/index.js
 const client = require('prom-client');
 const {Pushgateway} = client;
 
-// Set the Pushgateway address (can be passed via environment variable)
-const pushgatewayAddress = process.env.PUSHGATEWAY_ADDRESS || 'localhost:9091';
+// Upewnij się, że adres zawiera protokół "http://"
+const pushgatewayAddress = process.env.PUSHGATEWAY_ADDRESS || 'http://localhost:9091';
 const pushgateway = new Pushgateway(pushgatewayAddress);
 
-// Create a custom registry and collect default metrics if desired
+// Utwórz dedykowaną rejestrację i zbierz domyślne metryki
 const registry = new client.Registry();
 client.collectDefaultMetrics({register: registry});
 
-// Define custom counters for Cypress test metrics
+// Zdefiniuj niestandardowe liczniki dla metryk Cypress
 const testSuccessCounter = new client.Counter({
     name: 'cypress_test_success_total',
     help: 'Total number of successful Cypress tests',
@@ -23,7 +22,6 @@ const testFailureCounter = new client.Counter({
     registers: [registry],
 });
 
-// Additional counters for performance issues:
 const performancePositiveCounter = new client.Counter({
     name: 'cypress_positive_performance_failures_total',
     help: 'Total number of positive tests (with correct credentials) that exceeded the expected duration threshold',
@@ -37,14 +35,12 @@ const performanceNegativeCounter = new client.Counter({
 });
 
 module.exports = (on, config) => {
-    // After the test run finishes, update our counters and push metrics to the Pushgateway.
-    on('after:run', (results) => {
+    on('after:run', async (results) => {
         if (results) {
-            // Increase basic counters using the totals from the test run
+            // Aktualizuj liczniki w oparciu o wyniki testów
             testSuccessCounter.inc(results.totalPassed);
             testFailureCounter.inc(results.totalFailed);
 
-            // Iterate over each test run to detect performance-related issues.
             let positivePerfIssues = 0;
             let negativePerfIssues = 0;
 
@@ -54,39 +50,34 @@ module.exports = (on, config) => {
                     const isPositive = (process.env.LOGIN === 'student' && process.env.PASSWORD === 'Password123');
 
                     if (isPositive) {
-                        if (duration > 4000) { // Threshold for positive tests
+                        if (duration > 4000) { // Próg dla pozytywnych testów
                             positivePerfIssues++;
                         }
                     } else {
-                        // For negative tests, count as performance issue if the test passed or its duration is very short.
-                        if (run.state === 'passed' || duration < 1000) {
+                        if (run.state === 'passed' || duration < 1000) { // Próg dla negatywnych testów
                             negativePerfIssues++;
                         }
                     }
                 });
             }
-
             performancePositiveCounter.inc(positivePerfIssues);
             performanceNegativeCounter.inc(negativePerfIssues);
         }
 
-        // Dodajemy logowanie przed próbą pushowania metryk:
-        console.log(`Próba pushowania metryk do Pushgateway pod adresem: ${pushgatewayAddress}`);
+        console.log(`Pushing metrics to Pushgateway at ${pushgatewayAddress}`);
         try {
-            // Logujemy zawartość metryk, które będą pushowane
-            const metricsData = registry.metrics();
-            console.log('Zawartość metryk do wysłania:', metricsData);
+            const metricsData = await registry.metrics();
+            console.log('Metrics data:', metricsData);
         } catch (err) {
-            console.warn('Nie udało się pobrać zawartości metryk:', err);
+            console.warn('Error fetching metrics data:', err);
         }
 
-        // Push the metrics to the Pushgateway under the job name "cypress_tests"
-        pushgateway.pushAdd({jobName: 'cypress_tests'}, (err, resp, body) => {
+        // Użyj metody push, aby nadpisać poprzednie metryki
+        pushgateway.push({jobName: 'cypress_tests'}, (err, resp, body) => {
             if (err) {
-                console.error('Błąd pushowania metryk w momencie:', new Date().toISOString());
-                console.error('Szczegóły błędu:', err);
+                console.error('Error pushing metrics at', new Date().toISOString(), err);
             } else {
-                console.log('Metryki zostały poprawnie pushowane do Pushgateway w momencie:', new Date().toISOString());
+                console.log('Successfully pushed metrics at', new Date().toISOString());
             }
         });
     });
