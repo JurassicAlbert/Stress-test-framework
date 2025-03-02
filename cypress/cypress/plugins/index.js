@@ -40,6 +40,7 @@ module.exports = (on, config) => {
         console.log("Test results (JSON):", JSON.stringify(results, null, 2));
 
         if (results) {
+            // Upewnij się, że results zawiera oczekiwane pola, np. totalPassed i totalFailed
             testSuccessCounter.inc(results.totalPassed);
             testFailureCounter.inc(results.totalFailed);
 
@@ -71,13 +72,13 @@ module.exports = (on, config) => {
             // Wypisz metryki z Twojego rejestru – jako tekst
             const metricsData = await registry.metrics();
             console.log('Custom registry metrics (string):', metricsData);
-            // Wypisz metryki w formacie JSON (jeśli potrzebujesz dokładniejszej struktury)
+            // Wypisz metryki w formacie JSON (dla dokładniejszej struktury)
             console.log('Custom registry metrics (JSON):', registry.getMetricsAsJSON());
         } catch (err) {
             console.warn('Error fetching metrics data:', err);
         }
 
-        // Użyj funkcji pushToGateway, przekazując swój niestandardowy rejestr
+        // Używamy funkcji pushToGateway, przekazując swój niestandardowy rejestr
         const { pushToGateway } = require('prom-client');
         pushToGateway(pushgatewayAddress, 'cypress_tests', registry, (err, resp, body) => {
             if (err) {
