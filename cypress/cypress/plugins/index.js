@@ -3,7 +3,7 @@ const {Pushgateway} = client;
 
 const pushgatewayAddress = process.env.PUSHGATEWAY_ADDRESS || 'http://localhost:9091';
 const registry = new client.Registry();
-client.collectDefaultMetrics({register: registry});
+client.collectDefaultMetrics({ register: registry });
 
 // Zdefiniuj niestandardowe liczniki
 const testSuccessCounter = new client.Counter({
@@ -35,6 +35,9 @@ performanceNegativeCounter.inc(0);
 
 module.exports = (on, config) => {
     on('after:run', async (results) => {
+        // Sprawdź i wypisz wyniki testów
+        console.log("Test results:", results);
+
         if (results) {
             testSuccessCounter.inc(results.totalPassed);
             testFailureCounter.inc(results.totalFailed);
@@ -64,14 +67,17 @@ module.exports = (on, config) => {
 
         console.log(`Pushing metrics to Pushgateway at ${pushgatewayAddress}`);
         try {
+            // Wypisz metryki z Twojego rejestru – jako tekst
             const metricsData = await registry.metrics();
-            console.log('Metrics data:', metricsData);
+            console.log('Custom registry metrics (string):', metricsData);
+            // Wypisz metryki w formacie JSON (jeśli potrzebujesz dokładniejszej struktury)
+            console.log('Custom registry metrics (JSON):', registry.getMetricsAsJSON());
         } catch (err) {
             console.warn('Error fetching metrics data:', err);
         }
 
-        // Używamy funkcji pushToGateway z własnym rejestrem
-        const {pushToGateway} = require('prom-client');
+        // Użyj funkcji pushToGateway, przekazując swój niestandardowy rejestr
+        const { pushToGateway } = require('prom-client');
         pushToGateway(pushgatewayAddress, 'cypress_tests', registry, (err, resp, body) => {
             if (err) {
                 console.error('Error pushing metrics:', err);
