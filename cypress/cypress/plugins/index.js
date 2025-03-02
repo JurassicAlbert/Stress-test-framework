@@ -35,12 +35,12 @@ performanceNegativeCounter.inc(0);
 
 module.exports = (on, config) => {
     on('after:run', async (results) => {
-        // Sprawdź i wypisz wyniki testów
+        // Loguj wyniki testów dla diagnostyki
         console.log("Test results:", results);
         console.log("Test results (JSON):", JSON.stringify(results, null, 2));
 
         if (results) {
-            // Upewnij się, że results zawiera oczekiwane pola, np. totalPassed i totalFailed
+            // Upewnij się, że results zawiera oczekiwane pola (dostosuj nazwy jeśli to konieczne)
             testSuccessCounter.inc(results.totalPassed);
             testFailureCounter.inc(results.totalFailed);
 
@@ -65,20 +65,26 @@ module.exports = (on, config) => {
             }
             performancePositiveCounter.inc(positivePerfIssues);
             performanceNegativeCounter.inc(negativePerfIssues);
+
+            // Loguj aktualne wartości liczników
+            console.log("Success counter value:", testSuccessCounter.get().values);
+            console.log("Failure counter value:", testFailureCounter.get().values);
+            console.log("Performance positive counter value:", performancePositiveCounter.get().values);
+            console.log("Performance negative counter value:", performanceNegativeCounter.get().values);
         }
 
         console.log(`Pushing metrics to Pushgateway at ${pushgatewayAddress}`);
         try {
-            // Wypisz metryki z Twojego rejestru – jako tekst
+            // Wypisz metryki z rejestru – jako tekst
             const metricsData = await registry.metrics();
             console.log('Custom registry metrics (string):', metricsData);
-            // Wypisz metryki w formacie JSON (dla dokładniejszej struktury)
+            // Wypisz metryki w formacie JSON
             console.log('Custom registry metrics (JSON):', registry.getMetricsAsJSON());
         } catch (err) {
             console.warn('Error fetching metrics data:', err);
         }
 
-        // Używamy funkcji pushToGateway, przekazując swój niestandardowy rejestr
+        // Używamy funkcji pushToGateway, przekazując niestandardowy rejestr
         const { pushToGateway } = require('prom-client');
         pushToGateway(pushgatewayAddress, 'cypress_tests', registry, (err, resp, body) => {
             if (err) {
