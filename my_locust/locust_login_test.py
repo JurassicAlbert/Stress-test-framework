@@ -39,12 +39,15 @@ registry = CollectorRegistry(auto_describe=False)
 ProcessCollector(registry=registry)
 PlatformCollector(registry=registry)
 
+# Utworzenie liczników dla udanych i błędnych żądań
 REQUEST_SUCCESS_COUNTER = Counter(
     "locust_request_success_total",
     "Total successful requests",
     ["method", "name", "response_code"],
     registry=registry
 )
+# Inicjalizacja liczników, aby pojawiły się z wartością 0
+REQUEST_SUCCESS_COUNTER.inc(0)
 
 REQUEST_FAILURE_COUNTER = Counter(
     "locust_request_failure_total",
@@ -52,6 +55,7 @@ REQUEST_FAILURE_COUNTER = Counter(
     ["method", "name", "response_code"],
     registry=registry
 )
+REQUEST_FAILURE_COUNTER.inc(0)
 
 @events.request.add_listener
 def on_request(request_type, name, response_time, response_length, exception, **kwargs):
@@ -127,7 +131,6 @@ def push_metrics():
         print("Metrics pushed successfully to Pushgateway")
     except Exception as e:
         print("Error pushing metrics to Pushgateway:", e)
-
 
 # Push metrics once at startup (for initialization purposes)
 push_metrics()

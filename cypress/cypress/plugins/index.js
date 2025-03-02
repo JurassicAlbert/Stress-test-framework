@@ -34,6 +34,12 @@ const performanceNegativeCounter = new client.Counter({
     registers: [registry],
 });
 
+// Inicjalizacja liczników, aby były widoczne z wartością 0
+testSuccessCounter.inc(0);
+testFailureCounter.inc(0);
+performancePositiveCounter.inc(0);
+performanceNegativeCounter.inc(0);
+
 module.exports = (on, config) => {
     on('after:run', async (results) => {
         if (results) {
