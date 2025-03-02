@@ -37,6 +37,7 @@ module.exports = (on, config) => {
     on('after:run', async (results) => {
         // Sprawdź i wypisz wyniki testów
         console.log("Test results:", results);
+        console.log("Test results (JSON):", JSON.stringify(results, null, 2));
 
         if (results) {
             testSuccessCounter.inc(results.totalPassed);
