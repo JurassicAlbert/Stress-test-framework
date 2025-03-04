@@ -12,7 +12,7 @@ At the end, push_metrics() is called to push the metrics to the Prometheus Pushg
 
 import os
 from locust import HttpUser, TaskSet, task, between, events
-from prometheus_client import CollectorRegistry, Counter, push_to_gateway
+from prometheus_client import CollectorRegistry, Counter, push_to_gateway, REGISTRY
 from colorama import init
 
 # Initialize colorama
@@ -32,12 +32,17 @@ HEADERS = {
     )
 }
 
-# Create a Prometheus registry without auto-describing to avoid duplicate timeseries.
-# Nie rejestrujemy domyślnych kolektorów, aby wszystkie metryki pochodziły z naszych definicji,
-# które zawierają etykietę "instance".
+# Tworzymy własny rejestr – nie rejestrujemy domyślnych kolektorów
 registry = CollectorRegistry(auto_describe=False)
 
-# Definiujemy własne liczniki z etykietami stałymi (const_labels)
+# Usuń wszystkie domyślne kolektory z globalnego rejestru, aby nie były zbierane
+for collector in list(REGISTRY._collector_to_names.keys()):
+    try:
+        REGISTRY.unregister(collector)
+    except Exception as e:
+        print("Nie udało się odczepić kolektora:", e)
+
+# Definiujemy własne liczniki z etykietami stałymi ("instance")
 REQUEST_SUCCESS_COUNTER = Counter(
     "locust_request_success_total",
     "Total successful requests",
@@ -45,7 +50,6 @@ REQUEST_SUCCESS_COUNTER = Counter(
     registry=registry,
     const_labels={"instance": "locust_jenkins"}
 )
-# Inicjalizacja licznika, aby był widoczny z wartością 0
 REQUEST_SUCCESS_COUNTER.inc(0)
 
 REQUEST_FAILURE_COUNTER = Counter(
@@ -57,12 +61,14 @@ REQUEST_FAILURE_COUNTER = Counter(
 )
 REQUEST_FAILURE_COUNTER.inc(0)
 
+
 @events.request.add_listener
 def on_request(request_type, name, response_time, response_length, exception, **kwargs):
     if exception is None:
         REQUEST_SUCCESS_COUNTER.labels(method=request_type, name=name, response_code="200").inc()
     else:
         REQUEST_FAILURE_COUNTER.labels(method=request_type, name=name, response_code="0").inc()
+
 
 class PracticeLoginScenario(TaskSet):
     @task
@@ -82,7 +88,6 @@ class PracticeLoginScenario(TaskSet):
 
         # 2. Attempt login.
         if USERNAME == "student" and PASSWORD == "Password123":
-            # Positive scenario.
             with self.client.get(
                     "/logged-in-successfully/",
                     headers=HEADERS,
@@ -94,7 +99,6 @@ class PracticeLoginScenario(TaskSet):
                 else:
                     r.failure(f"Unexpected login result. Code: {r.status_code}")
         else:
-            # Negative scenario.
             error_msg = "Your username is invalid!" if USERNAME != "student" else "Your password is invalid!"
             self.environment.events.request.fire(
                 request_type="GET",
@@ -116,22 +120,24 @@ class PracticeLoginScenario(TaskSet):
             else:
                 logout_resp.failure(f"Failed to reset. Code: {logout_resp.status_code}")
 
+
 class WebsiteUser(HttpUser):
     host = LOCUST_HOST
     tasks = [PracticeLoginScenario]
     wait_time = between(1, 3)
+
 
 def push_metrics():
     """
     Push the collected metrics to the Prometheus Pushgateway.
     """
     try:
-        # Używamy pełnego adresu z protokołem oraz unikalnego klucza grupującego
         push_to_gateway("http://localhost:9091", job="locust_tests", registry=registry,
                         grouping_key={"instance": "locust_jenkins"})
         print("Metrics pushed successfully to Pushgateway")
     except Exception as e:
         print("Error pushing metrics to Pushgateway:", e)
+
 
 # Push metrics once at startup (for initialization purposes)
 push_metrics()
