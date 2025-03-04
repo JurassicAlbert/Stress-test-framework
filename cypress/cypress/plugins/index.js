@@ -84,9 +84,9 @@ module.exports = (on, config) => {
             console.warn('Error fetching metrics data:', err);
         }
 
-        // Używamy funkcji pushToGateway, przekazując niestandardowy rejestr
+        // Używamy funkcji pushToGateway, przekazując niestandardowy rejestr oraz unikalny klucz grupujący
         const { pushToGateway } = require('prom-client');
-        pushToGateway(pushgatewayAddress, 'cypress_tests', registry, (err, resp, body) => {
+        pushToGateway(pushgatewayAddress, 'cypress_tests', registry, { instance: 'cypress_jenkins' }, (err, resp, body) => {
             if (err) {
                 console.error('Error pushing metrics:', err);
             } else {

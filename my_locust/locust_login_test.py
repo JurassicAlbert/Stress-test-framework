@@ -126,8 +126,8 @@ def push_metrics():
     Push the collected metrics to the Prometheus Pushgateway.
     """
     try:
-        # Używamy pełnego adresu z protokołem
-        push_to_gateway("http://localhost:9091", job="locust_tests", registry=registry)
+        # Używamy pełnego adresu z protokołem oraz unikalnego klucza grupującego
+        push_to_gateway("http://localhost:9091", job="locust_tests", registry=registry, grouping_key={"instance": "locust_jenkins"})
         print("Metrics pushed successfully to Pushgateway")
     except Exception as e:
         print("Error pushing metrics to Pushgateway:", e)
