@@ -12,7 +12,7 @@ At the end, push_metrics() is called to push the metrics to the Prometheus Pushg
 
 import os
 from locust import HttpUser, TaskSet, task, between, events
-from prometheus_client import CollectorRegistry, Counter, push_to_gateway, ProcessCollector, PlatformCollector
+from prometheus_client import CollectorRegistry, Counter, push_to_gateway
 from colorama import init
 
 # Initialize colorama
@@ -33,13 +33,11 @@ HEADERS = {
 }
 
 # Create a Prometheus registry without auto-describing to avoid duplicate timeseries.
+# Nie rejestrujemy domyślnych kolektorów, aby wszystkie metryki pochodziły z naszych definicji,
+# które zawierają etykietę "instance".
 registry = CollectorRegistry(auto_describe=False)
 
-# Register process and platform collectors (e.g. CPU, memory, etc.)
-ProcessCollector(registry=registry)
-PlatformCollector(registry=registry)
-
-# Utworzenie liczników z dodanymi etykietami stałymi ("instance")
+# Definiujemy własne liczniki z etykietami stałymi (const_labels)
 REQUEST_SUCCESS_COUNTER = Counter(
     "locust_request_success_total",
     "Total successful requests",
@@ -47,7 +45,7 @@ REQUEST_SUCCESS_COUNTER = Counter(
     registry=registry,
     const_labels={"instance": "locust_jenkins"}
 )
-# Inicjalizacja liczników, aby pojawiły się z wartością 0
+# Inicjalizacja licznika, aby był widoczny z wartością 0
 REQUEST_SUCCESS_COUNTER.inc(0)
 
 REQUEST_FAILURE_COUNTER = Counter(
@@ -59,14 +57,12 @@ REQUEST_FAILURE_COUNTER = Counter(
 )
 REQUEST_FAILURE_COUNTER.inc(0)
 
-
 @events.request.add_listener
 def on_request(request_type, name, response_time, response_length, exception, **kwargs):
     if exception is None:
         REQUEST_SUCCESS_COUNTER.labels(method=request_type, name=name, response_code="200").inc()
     else:
         REQUEST_FAILURE_COUNTER.labels(method=request_type, name=name, response_code="0").inc()
-
 
 class PracticeLoginScenario(TaskSet):
     @task
@@ -120,12 +116,10 @@ class PracticeLoginScenario(TaskSet):
             else:
                 logout_resp.failure(f"Failed to reset. Code: {logout_resp.status_code}")
 
-
 class WebsiteUser(HttpUser):
     host = LOCUST_HOST
     tasks = [PracticeLoginScenario]
     wait_time = between(1, 3)
-
 
 def push_metrics():
     """
@@ -138,7 +132,6 @@ def push_metrics():
         print("Metrics pushed successfully to Pushgateway")
     except Exception as e:
         print("Error pushing metrics to Pushgateway:", e)
-
 
 # Push metrics once at startup (for initialization purposes)
 push_metrics()
