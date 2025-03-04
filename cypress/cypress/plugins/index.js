@@ -3,7 +3,11 @@ const {Pushgateway} = client;
 
 const pushgatewayAddress = process.env.PUSHGATEWAY_ADDRESS || 'http://localhost:9091';
 const registry = new client.Registry();
-client.collectDefaultMetrics({ register: registry });
+
+// Ustaw domyślne etykiety dla rejestru
+registry.setDefaultLabels({instance: 'cypress_jenkins'});
+
+client.collectDefaultMetrics({register: registry});
 
 // Zdefiniuj niestandardowe liczniki
 const testSuccessCounter = new client.Counter({
@@ -85,8 +89,8 @@ module.exports = (on, config) => {
         }
 
         // Używamy funkcji pushToGateway, przekazując niestandardowy rejestr oraz unikalny klucz grupujący
-        const { pushToGateway } = require('prom-client');
-        pushToGateway(pushgatewayAddress, 'cypress_tests', registry, { instance: 'cypress_jenkins' }, (err, resp, body) => {
+        const {pushToGateway} = require('prom-client');
+        pushToGateway(pushgatewayAddress, 'cypress_tests', registry, {instance: 'cypress_jenkins'}, (err, resp, body) => {
             if (err) {
                 console.error('Error pushing metrics:', err);
             } else {

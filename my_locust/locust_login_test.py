@@ -39,12 +39,13 @@ registry = CollectorRegistry(auto_describe=False)
 ProcessCollector(registry=registry)
 PlatformCollector(registry=registry)
 
-# Utworzenie liczników dla udanych i błędnych żądań
+# Utworzenie liczników z dodanymi etykietami stałymi ("instance")
 REQUEST_SUCCESS_COUNTER = Counter(
     "locust_request_success_total",
     "Total successful requests",
     ["method", "name", "response_code"],
-    registry=registry
+    registry=registry,
+    const_labels={"instance": "locust_jenkins"}
 )
 # Inicjalizacja liczników, aby pojawiły się z wartością 0
 REQUEST_SUCCESS_COUNTER.inc(0)
@@ -53,9 +54,11 @@ REQUEST_FAILURE_COUNTER = Counter(
     "locust_request_failure_total",
     "Total failed requests",
     ["method", "name", "response_code"],
-    registry=registry
+    registry=registry,
+    const_labels={"instance": "locust_jenkins"}
 )
 REQUEST_FAILURE_COUNTER.inc(0)
+
 
 @events.request.add_listener
 def on_request(request_type, name, response_time, response_length, exception, **kwargs):
@@ -64,15 +67,16 @@ def on_request(request_type, name, response_time, response_length, exception, **
     else:
         REQUEST_FAILURE_COUNTER.labels(method=request_type, name=name, response_code="0").inc()
 
+
 class PracticeLoginScenario(TaskSet):
     @task
     def login_test(self):
         # 1. Load the login page.
         with self.client.get(
-            "/practice-test-login/",
-            headers=HEADERS,
-            catch_response=True,
-            name="Load Login Page"
+                "/practice-test-login/",
+                headers=HEADERS,
+                catch_response=True,
+                name="Load Login Page"
         ) as resp:
             if resp.status_code == 200:
                 resp.success()
@@ -84,10 +88,10 @@ class PracticeLoginScenario(TaskSet):
         if USERNAME == "student" and PASSWORD == "Password123":
             # Positive scenario.
             with self.client.get(
-                "/logged-in-successfully/",
-                headers=HEADERS,
-                catch_response=True,
-                name="After Login Redirect"
+                    "/logged-in-successfully/",
+                    headers=HEADERS,
+                    catch_response=True,
+                    name="After Login Redirect"
             ) as r:
                 if r.status_code == 200 and ("Logged In Successfully" in r.text or "Congratulations" in r.text):
                     r.success()
@@ -106,20 +110,22 @@ class PracticeLoginScenario(TaskSet):
 
         # 3. Logout/reset.
         with self.client.get(
-            "/practice-test-login/",
-            headers=HEADERS,
-            catch_response=True,
-            name="Logout/Reset"
+                "/practice-test-login/",
+                headers=HEADERS,
+                catch_response=True,
+                name="Logout/Reset"
         ) as logout_resp:
             if logout_resp.status_code == 200:
                 logout_resp.success()
             else:
                 logout_resp.failure(f"Failed to reset. Code: {logout_resp.status_code}")
 
+
 class WebsiteUser(HttpUser):
     host = LOCUST_HOST
     tasks = [PracticeLoginScenario]
     wait_time = between(1, 3)
+
 
 def push_metrics():
     """
@@ -127,10 +133,12 @@ def push_metrics():
     """
     try:
         # Używamy pełnego adresu z protokołem oraz unikalnego klucza grupującego
-        push_to_gateway("http://localhost:9091", job="locust_tests", registry=registry, grouping_key={"instance": "locust_jenkins"})
+        push_to_gateway("http://localhost:9091", job="locust_tests", registry=registry,
+                        grouping_key={"instance": "locust_jenkins"})
         print("Metrics pushed successfully to Pushgateway")
     except Exception as e:
         print("Error pushing metrics to Pushgateway:", e)
+
 
 # Push metrics once at startup (for initialization purposes)
 push_metrics()
