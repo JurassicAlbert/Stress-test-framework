@@ -12,7 +12,7 @@ At the end, push_metrics() is called to push the metrics to the Prometheus Pushg
 
 import os
 from locust import HttpUser, TaskSet, task, between, events
-from prometheus_client import CollectorRegistry, Counter, push_to_gateway, REGISTRY
+from prometheus_client import CollectorRegistry, Counter, Histogram, push_to_gateway, REGISTRY
 from colorama import init
 
 # Initialize colorama
@@ -62,18 +62,33 @@ REQUEST_FAILURE_COUNTER = Counter(
 )
 REQUEST_FAILURE_COUNTER.inc(0)
 
+# Definiujemy metrykę histogramu dla czasów odpowiedzi
+REQUEST_DURATION_HISTOGRAM = Histogram(
+    "locust_request_duration_seconds",
+    "Histogram of request durations in seconds",
+    buckets=[0.1, 0.3, 1.5, 10.0],
+    registry=registry,
+    const_labels={"instance": "locust_jenkins"}
+)
+
+
 @events.request.add_listener
 def on_request(request_type, name, response_time, response_length, exception, **kwargs):
+    # Rejestracja czasu trwania żądania – przeliczamy ms na sekundy
+    REQUEST_DURATION_HISTOGRAM.observe(response_time / 1000)
+
     if exception is None:
         REQUEST_SUCCESS_COUNTER.labels(method=request_type, name=name, response_code="200").inc()
     else:
         REQUEST_FAILURE_COUNTER.labels(method=request_type, name=name, response_code="0").inc()
 
+
 class PracticeLoginScenario(TaskSet):
     @task
     def login_test(self):
         # 1. Load the login page.
-        with self.client.get("/practice-test-login/", headers=HEADERS, catch_response=True, name="Load Login Page") as resp:
+        with self.client.get("/practice-test-login/", headers=HEADERS, catch_response=True,
+                             name="Load Login Page") as resp:
             if resp.status_code == 200:
                 resp.success()
             else:
@@ -82,7 +97,8 @@ class PracticeLoginScenario(TaskSet):
 
         # 2. Attempt login.
         if USERNAME == "student" and PASSWORD == "Password123":
-            with self.client.get("/logged-in-successfully/", headers=HEADERS, catch_response=True, name="After Login Redirect") as r:
+            with self.client.get("/logged-in-successfully/", headers=HEADERS, catch_response=True,
+                                 name="After Login Redirect") as r:
                 if r.status_code == 200 and ("Logged In Successfully" in r.text or "Congratulations" in r.text):
                     r.success()
                 else:
@@ -98,16 +114,19 @@ class PracticeLoginScenario(TaskSet):
             )
 
         # 3. Logout/reset.
-        with self.client.get("/practice-test-login/", headers=HEADERS, catch_response=True, name="Logout/Reset") as logout_resp:
+        with self.client.get("/practice-test-login/", headers=HEADERS, catch_response=True,
+                             name="Logout/Reset") as logout_resp:
             if logout_resp.status_code == 200:
                 logout_resp.success()
             else:
                 logout_resp.failure(f"Failed to reset. Code: {logout_resp.status_code}")
 
+
 class WebsiteUser(HttpUser):
     host = LOCUST_HOST
     tasks = [PracticeLoginScenario]
     wait_time = between(1, 3)
+
 
 def push_metrics():
     """
@@ -119,6 +138,7 @@ def push_metrics():
         print("Metrics pushed successfully to Pushgateway")
     except Exception as e:
         print("Error pushing metrics to Pushgateway:", e)
+
 
 # Push metrics once at startup (for initialization purposes)
 push_metrics()

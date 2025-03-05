@@ -40,6 +40,15 @@ testFailureCounter.inc(0);
 performancePositiveCounter.inc(0);
 performanceNegativeCounter.inc(0);
 
+// *** Definicja metryki histogram dla czasów testów ***
+// Buckety są zdefiniowane w sekundach (przykładowe wartości: 0.1, 0.3, 1.5, 10.0)
+const testDurationHistogram = new client.Histogram({
+  name: 'cypress_test_duration_seconds',
+  help: 'Histogram of test durations in seconds',
+  buckets: [0.1, 0.3, 1.5, 10.0],
+  registers: [registry],
+});
+
 module.exports = (on, config) => {
   on('after:run', async (results) => {
     console.log("Test results:", results);
@@ -55,6 +64,9 @@ module.exports = (on, config) => {
       if (results.runs && Array.isArray(results.runs)) {
         results.runs.forEach(run => {
           const duration = run.duration || 0;
+          // Rejestracja czasu testu – konwersja z ms na sekundy
+          testDurationHistogram.observe(duration / 1000);
+
           const isPositive = (process.env.LOGIN === 'student' && process.env.PASSWORD === 'Password123');
           if (isPositive) {
             if (duration > 4000) {
@@ -74,6 +86,7 @@ module.exports = (on, config) => {
       console.log("Failure counter value:", testFailureCounter.get().values);
       console.log("Performance positive counter value:", performancePositiveCounter.get().values);
       console.log("Performance negative counter value:", performanceNegativeCounter.get().values);
+      console.log("Test duration histogram:", testDurationHistogram.get().values);
     }
 
     console.log(`Pushing metrics to Pushgateway at ${pushgatewayAddress}`);
