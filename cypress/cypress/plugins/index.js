@@ -6,96 +6,94 @@ const registry = new client.Registry();
 
 // Ustaw domyślne etykiety dla rejestru
 registry.setDefaultLabels({ instance: 'cypress_jenkins' });
-console.log("Default labels set to:", JSON.stringify(registry._defaultLabels));
+console.log("Default labels set to:", JSON.stringify(registry.getDefaultLabels()));
 
-// Upewnij się, że default labels zostały ustawione przed collectDefaultMetrics
+// Upewnij się, że domyślne etykiety są ustawione przed zbieraniem metryk
 client.collectDefaultMetrics({ register: registry });
 console.log("Collected default metrics with default labels.");
 
 // Zdefiniuj niestandardowe liczniki
 const testSuccessCounter = new client.Counter({
-    name: 'cypress_test_success_total',
-    help: 'Total number of successful Cypress tests',
-    registers: [registry],
+  name: 'cypress_test_success_total',
+  help: 'Total number of successful Cypress tests',
+  registers: [registry],
 });
 const testFailureCounter = new client.Counter({
-    name: 'cypress_test_failure_total',
-    help: 'Total number of failed Cypress tests',
-    registers: [registry],
+  name: 'cypress_test_failure_total',
+  help: 'Total number of failed Cypress tests',
+  registers: [registry],
 });
 const performancePositiveCounter = new client.Counter({
-    name: 'cypress_positive_performance_failures_total',
-    help: 'Total number of positive tests that exceeded the expected duration threshold',
-    registers: [registry],
+  name: 'cypress_positive_performance_failures_total',
+  help: 'Total number of positive tests that exceeded the expected duration threshold',
+  registers: [registry],
 });
 const performanceNegativeCounter = new client.Counter({
-    name: 'cypress_negative_performance_unexpected_pass_total',
-    help: 'Total number of negative tests that unexpectedly passed or had a very short duration',
-    registers: [registry],
+  name: 'cypress_negative_performance_unexpected_pass_total',
+  help: 'Total number of negative tests that unexpectedly passed or had a very short duration',
+  registers: [registry],
 });
 
-// Inicjalizacja liczników, aby były widoczne z wartością 0
+// Inicjalizacja liczników (aby były widoczne z wartością 0)
 testSuccessCounter.inc(0);
 testFailureCounter.inc(0);
 performancePositiveCounter.inc(0);
 performanceNegativeCounter.inc(0);
 
 module.exports = (on, config) => {
-    on('after:run', async (results) => {
-        // Loguj wyniki testów dla diagnostyki
-        console.log("Test results:", results);
-        console.log("Test results (JSON):", JSON.stringify(results, null, 2));
+  on('after:run', async (results) => {
+    console.log("Test results:", results);
+    console.log("Test results (JSON):", JSON.stringify(results, null, 2));
 
-        if (results) {
-            testSuccessCounter.inc(results.totalPassed);
-            testFailureCounter.inc(results.totalFailed);
+    if (results) {
+      testSuccessCounter.inc(results.totalPassed);
+      testFailureCounter.inc(results.totalFailed);
 
-            let positivePerfIssues = 0;
-            let negativePerfIssues = 0;
+      let positivePerfIssues = 0;
+      let negativePerfIssues = 0;
 
-            if (results.runs && Array.isArray(results.runs)) {
-                results.runs.forEach(run => {
-                    const duration = run.duration || 0;
-                    const isPositive = (process.env.LOGIN === 'student' && process.env.PASSWORD === 'Password123');
-                    if (isPositive) {
-                        if (duration > 4000) {
-                            positivePerfIssues++;
-                        }
-                    } else {
-                        if (run.state === 'passed' || duration < 1000) {
-                            negativePerfIssues++;
-                        }
-                    }
-                });
+      if (results.runs && Array.isArray(results.runs)) {
+        results.runs.forEach(run => {
+          const duration = run.duration || 0;
+          const isPositive = (process.env.LOGIN === 'student' && process.env.PASSWORD === 'Password123');
+          if (isPositive) {
+            if (duration > 4000) {
+              positivePerfIssues++;
             }
-            performancePositiveCounter.inc(positivePerfIssues);
-            performanceNegativeCounter.inc(negativePerfIssues);
-
-            // Loguj aktualne wartości liczników
-            console.log("Success counter value:", testSuccessCounter.get().values);
-            console.log("Failure counter value:", testFailureCounter.get().values);
-            console.log("Performance positive counter value:", performancePositiveCounter.get().values);
-            console.log("Performance negative counter value:", performanceNegativeCounter.get().values);
-        }
-
-        console.log(`Pushing metrics to Pushgateway at ${pushgatewayAddress}`);
-        try {
-            const metricsData = await registry.metrics();
-            console.log('Custom registry metrics (string):', metricsData);
-            console.log('Custom registry metrics (JSON):', registry.getMetricsAsJSON());
-        } catch (err) {
-            console.warn('Error fetching metrics data:', err);
-        }
-
-        const { pushToGateway } = require('prom-client');
-        pushToGateway(pushgatewayAddress, 'cypress_tests', registry, { instance: 'cypress_jenkins' }, (err, resp, body) => {
-            if (err) {
-                console.error('Error pushing metrics:', err);
-            } else {
-                console.log('Successfully pushed metrics at', new Date().toISOString());
+          } else {
+            if (run.state === 'passed' || duration < 1000) {
+              negativePerfIssues++;
             }
+          }
         });
+      }
+      performancePositiveCounter.inc(positivePerfIssues);
+      performanceNegativeCounter.inc(negativePerfIssues);
 
-        return config;
+      console.log("Success counter value:", testSuccessCounter.get().values);
+      console.log("Failure counter value:", testFailureCounter.get().values);
+      console.log("Performance positive counter value:", performancePositiveCounter.get().values);
+      console.log("Performance negative counter value:", performanceNegativeCounter.get().values);
+    }
+
+    console.log(`Pushing metrics to Pushgateway at ${pushgatewayAddress}`);
+    try {
+      const metricsData = await registry.metrics();
+      console.log('Custom registry metrics (string):', metricsData);
+      console.log('Custom registry metrics (JSON):', registry.getMetricsAsJSON());
+    } catch (err) {
+      console.warn('Error fetching metrics data:', err);
+    }
+
+    const { pushToGateway } = require('prom-client');
+    pushToGateway(pushgatewayAddress, 'cypress_tests', registry, { instance: 'cypress_jenkins' }, (err, resp, body) => {
+      if (err) {
+        console.error('Error pushing metrics:', err);
+      } else {
+        console.log('Successfully pushed metrics at', new Date().toISOString());
+      }
     });
+
+    return config;
+  });
 };

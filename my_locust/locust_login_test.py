@@ -32,10 +32,11 @@ HEADERS = {
     )
 }
 
-# Tworzymy własny rejestr – nie rejestrujemy domyślnych kolektorów
+# Tworzymy własny rejestr – nie rejestrujemy domyślnych kolektorów,
+# aby mieć pełną kontrolę nad metrykami (wszystkie metryki będą zdefiniowane przez nas)
 registry = CollectorRegistry(auto_describe=False)
 
-# Usuń wszystkie domyślne kolektory z globalnego rejestru, aby nie były zbierane
+# Usuń domyślne kolektory z globalnego rejestru, aby nie pobierać globalnych metryk
 for collector in list(REGISTRY._collector_to_names.keys()):
     try:
         REGISTRY.unregister(collector)
@@ -61,7 +62,6 @@ REQUEST_FAILURE_COUNTER = Counter(
 )
 REQUEST_FAILURE_COUNTER.inc(0)
 
-
 @events.request.add_listener
 def on_request(request_type, name, response_time, response_length, exception, **kwargs):
     if exception is None:
@@ -69,17 +69,11 @@ def on_request(request_type, name, response_time, response_length, exception, **
     else:
         REQUEST_FAILURE_COUNTER.labels(method=request_type, name=name, response_code="0").inc()
 
-
 class PracticeLoginScenario(TaskSet):
     @task
     def login_test(self):
         # 1. Load the login page.
-        with self.client.get(
-                "/practice-test-login/",
-                headers=HEADERS,
-                catch_response=True,
-                name="Load Login Page"
-        ) as resp:
+        with self.client.get("/practice-test-login/", headers=HEADERS, catch_response=True, name="Load Login Page") as resp:
             if resp.status_code == 200:
                 resp.success()
             else:
@@ -88,12 +82,7 @@ class PracticeLoginScenario(TaskSet):
 
         # 2. Attempt login.
         if USERNAME == "student" and PASSWORD == "Password123":
-            with self.client.get(
-                    "/logged-in-successfully/",
-                    headers=HEADERS,
-                    catch_response=True,
-                    name="After Login Redirect"
-            ) as r:
+            with self.client.get("/logged-in-successfully/", headers=HEADERS, catch_response=True, name="After Login Redirect") as r:
                 if r.status_code == 200 and ("Logged In Successfully" in r.text or "Congratulations" in r.text):
                     r.success()
                 else:
@@ -109,23 +98,16 @@ class PracticeLoginScenario(TaskSet):
             )
 
         # 3. Logout/reset.
-        with self.client.get(
-                "/practice-test-login/",
-                headers=HEADERS,
-                catch_response=True,
-                name="Logout/Reset"
-        ) as logout_resp:
+        with self.client.get("/practice-test-login/", headers=HEADERS, catch_response=True, name="Logout/Reset") as logout_resp:
             if logout_resp.status_code == 200:
                 logout_resp.success()
             else:
                 logout_resp.failure(f"Failed to reset. Code: {logout_resp.status_code}")
 
-
 class WebsiteUser(HttpUser):
     host = LOCUST_HOST
     tasks = [PracticeLoginScenario]
     wait_time = between(1, 3)
-
 
 def push_metrics():
     """
@@ -137,7 +119,6 @@ def push_metrics():
         print("Metrics pushed successfully to Pushgateway")
     except Exception as e:
         print("Error pushing metrics to Pushgateway:", e)
-
 
 # Push metrics once at startup (for initialization purposes)
 push_metrics()
