@@ -3,27 +3,23 @@
 locust_login_test.py
 
 This file runs a login test repeatedly using Locust and records Prometheus metrics.
-It measures:
-  - The number of successful and failed requests.
-  - (Metrics are updated via an event listener on events.request.)
-
-At the end, push_metrics() is called to push the metrics to the Prometheus Pushgateway.
+Instead of pushing metrics to Pushgateway, metrics are now exposed directly via an HTTP server.
 """
 
 import os
 from locust import HttpUser, TaskSet, task, between, events
-from prometheus_client import CollectorRegistry, Counter, Histogram, push_to_gateway, REGISTRY
+from prometheus_client import CollectorRegistry, Counter, Histogram, start_http_server, REGISTRY
 from colorama import init
 
 # Initialize colorama
 init(autoreset=True)
 
-# Default host and login credentials (from environment variables)
+# Ustawienia hosta i danych logowania
 LOCUST_HOST = os.getenv("LOCUST_HOST", "https://practicetestautomation.com")
 USERNAME = os.getenv("LOCUST_USERNAME", "student")
 PASSWORD = os.getenv("LOCUST_PASSWORD", "Password123")
 
-# Header simulating a browser – DO NOT CHANGE
+# Nagłówki symulujące przeglądarkę
 HEADERS = {
     "User-Agent": (
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -32,18 +28,17 @@ HEADERS = {
     )
 }
 
-# Tworzymy własny rejestr – nie rejestrujemy domyślnych kolektorów,
-# aby mieć pełną kontrolę nad metrykami (wszystkie metryki będą zdefiniowane przez nas)
+# Utwórz własny rejestr metryk
 registry = CollectorRegistry(auto_describe=False)
 
-# Usuń domyślne kolektory z globalnego rejestru, aby nie pobierać globalnych metryk
+# Odczepienie domyślnych kolektorów
 for collector in list(REGISTRY._collector_to_names.keys()):
     try:
         REGISTRY.unregister(collector)
     except Exception as e:
         print("Nie udało się odczepić kolektora:", e)
 
-# Definiujemy własne liczniki z etykietami stałymi ("instance")
+# Definicja liczników z etykietami stałymi
 REQUEST_SUCCESS_COUNTER = Counter(
     "locust_request_success_total",
     "Total successful requests",
@@ -62,7 +57,7 @@ REQUEST_FAILURE_COUNTER = Counter(
 )
 REQUEST_FAILURE_COUNTER.inc(0)
 
-# Definiujemy metrykę histogramu dla czasów odpowiedzi
+# Definicja histogramu dla czasów odpowiedzi
 REQUEST_DURATION_HISTOGRAM = Histogram(
     "locust_request_duration_seconds",
     "Histogram of request durations in seconds",
@@ -71,24 +66,28 @@ REQUEST_DURATION_HISTOGRAM = Histogram(
     const_labels={"instance": "locust_jenkins"}
 )
 
+# Uruchomienie serwera metryk podczas inicjalizacji Locusta
+@events.init.add_listener
+def on_locust_init(environment, **kwargs):
+    port = int(os.getenv("METRICS_PORT", "5000"))
+    start_http_server(port, registry=registry)
+    print(f"Locust metrics server is running on port {port}")
 
 @events.request.add_listener
 def on_request(request_type, name, response_time, response_length, exception, **kwargs):
-    # Rejestracja czasu trwania żądania – przeliczamy ms na sekundy
+    # Rejestracja czasu trwania (przeliczamy ms na sekundy)
     REQUEST_DURATION_HISTOGRAM.observe(response_time / 1000)
-
     if exception is None:
         REQUEST_SUCCESS_COUNTER.labels(method=request_type, name=name, response_code="200").inc()
     else:
         REQUEST_FAILURE_COUNTER.labels(method=request_type, name=name, response_code="0").inc()
-
 
 class PracticeLoginScenario(TaskSet):
     @task
     def login_test(self):
         # 1. Load the login page.
         with self.client.get("/practice-test-login/", headers=HEADERS, catch_response=True,
-                             name="Load Login Page") as resp:
+                               name="Load Login Page") as resp:
             if resp.status_code == 200:
                 resp.success()
             else:
@@ -98,7 +97,7 @@ class PracticeLoginScenario(TaskSet):
         # 2. Attempt login.
         if USERNAME == "student" and PASSWORD == "Password123":
             with self.client.get("/logged-in-successfully/", headers=HEADERS, catch_response=True,
-                                 name="After Login Redirect") as r:
+                                   name="After Login Redirect") as r:
                 if r.status_code == 200 and ("Logged In Successfully" in r.text or "Congratulations" in r.text):
                     r.success()
                 else:
@@ -115,30 +114,13 @@ class PracticeLoginScenario(TaskSet):
 
         # 3. Logout/reset.
         with self.client.get("/practice-test-login/", headers=HEADERS, catch_response=True,
-                             name="Logout/Reset") as logout_resp:
+                               name="Logout/Reset") as logout_resp:
             if logout_resp.status_code == 200:
                 logout_resp.success()
             else:
                 logout_resp.failure(f"Failed to reset. Code: {logout_resp.status_code}")
 
-
 class WebsiteUser(HttpUser):
     host = LOCUST_HOST
     tasks = [PracticeLoginScenario]
     wait_time = between(1, 3)
-
-
-def push_metrics():
-    """
-    Push the collected metrics to the Prometheus Pushgateway.
-    """
-    try:
-        push_to_gateway("http://localhost:9091", job="locust_tests", registry=registry,
-                        grouping_key={"instance": "locust_jenkins"})
-        print("Metrics pushed successfully to Pushgateway")
-    except Exception as e:
-        print("Error pushing metrics to Pushgateway:", e)
-
-
-# Push metrics once at startup (for initialization purposes)
-push_metrics()

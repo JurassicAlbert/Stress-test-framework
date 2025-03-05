@@ -1,16 +1,14 @@
+const express = require('express');
 const client = require('prom-client');
-const { Pushgateway } = client;
+const app = express();
+const port = process.env.METRICS_PORT || 3100;
 
-const pushgatewayAddress = process.env.PUSHGATEWAY_ADDRESS || 'http://localhost:9091';
+// Tworzymy własny rejestr metryk
 const registry = new client.Registry();
 
-// Ustaw domyślne etykiety dla rejestru
+// Ustaw domyślne etykiety oraz zbieraj domyślne metryki
 registry.setDefaultLabels({ instance: 'cypress_jenkins' });
-console.log("Default labels set to:", JSON.stringify(registry.getDefaultLabels()));
-
-// Upewnij się, że domyślne etykiety są ustawione przed zbieraniem metryk
 client.collectDefaultMetrics({ register: registry });
-console.log("Collected default metrics with default labels.");
 
 // Zdefiniuj niestandardowe liczniki
 const testSuccessCounter = new client.Counter({
@@ -34,14 +32,13 @@ const performanceNegativeCounter = new client.Counter({
   registers: [registry],
 });
 
-// Inicjalizacja liczników (aby były widoczne z wartością 0)
+// Inicjalizacja liczników
 testSuccessCounter.inc(0);
 testFailureCounter.inc(0);
 performancePositiveCounter.inc(0);
 performanceNegativeCounter.inc(0);
 
-// *** Definicja metryki histogram dla czasów testów ***
-// Buckety są zdefiniowane w sekundach (przykładowe wartości: 0.1, 0.3, 1.5, 10.0)
+// Definicja histogramu dla czasów testów
 const testDurationHistogram = new client.Histogram({
   name: 'cypress_test_duration_seconds',
   help: 'Histogram of test durations in seconds',
@@ -49,24 +46,19 @@ const testDurationHistogram = new client.Histogram({
   registers: [registry],
 });
 
+// Funkcja pluginu Cypress (np. w pliku plugins/index.js)
 module.exports = (on, config) => {
   on('after:run', async (results) => {
-    console.log("Test results:", results);
-    console.log("Test results (JSON):", JSON.stringify(results, null, 2));
-
     if (results) {
       testSuccessCounter.inc(results.totalPassed);
       testFailureCounter.inc(results.totalFailed);
-
       let positivePerfIssues = 0;
       let negativePerfIssues = 0;
-
       if (results.runs && Array.isArray(results.runs)) {
         results.runs.forEach(run => {
           const duration = run.duration || 0;
-          // Rejestracja czasu testu – konwersja z ms na sekundy
+          // Rejestracja czasu testu (konwersja z milisekund na sekundy)
           testDurationHistogram.observe(duration / 1000);
-
           const isPositive = (process.env.LOGIN === 'student' && process.env.PASSWORD === 'Password123');
           if (isPositive) {
             if (duration > 4000) {
@@ -81,32 +73,17 @@ module.exports = (on, config) => {
       }
       performancePositiveCounter.inc(positivePerfIssues);
       performanceNegativeCounter.inc(negativePerfIssues);
-
-      console.log("Success counter value:", testSuccessCounter.get().values);
-      console.log("Failure counter value:", testFailureCounter.get().values);
-      console.log("Performance positive counter value:", performancePositiveCounter.get().values);
-      console.log("Performance negative counter value:", performanceNegativeCounter.get().values);
-      console.log("Test duration histogram:", testDurationHistogram.get().values);
     }
-
-    console.log(`Pushing metrics to Pushgateway at ${pushgatewayAddress}`);
-    try {
-      const metricsData = await registry.metrics();
-      console.log('Custom registry metrics (string):', metricsData);
-      console.log('Custom registry metrics (JSON):', registry.getMetricsAsJSON());
-    } catch (err) {
-      console.warn('Error fetching metrics data:', err);
-    }
-
-    const { pushToGateway } = require('prom-client');
-    pushToGateway(pushgatewayAddress, 'cypress_tests', registry, { instance: 'cypress_jenkins' }, (err, resp, body) => {
-      if (err) {
-        console.error('Error pushing metrics:', err);
-      } else {
-        console.log('Successfully pushed metrics at', new Date().toISOString());
-      }
-    });
-
     return config;
   });
 };
+
+// Uruchomienie serwera metryk
+app.get('/metrics', async (req, res) => {
+  res.set('Content-Type', registry.contentType);
+  res.end(await registry.metrics());
+});
+
+app.listen(port, () => {
+  console.log(`Cypress metrics server is running on port ${port}`);
+});
