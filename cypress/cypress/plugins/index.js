@@ -1,16 +1,13 @@
-const express = require('express');
+const fs = require('fs');
+const http = require('http');
 const client = require('prom-client');
-const app = express();
-const port = process.env.METRICS_PORT || 3100;
 
-// Tworzymy własny rejestr metryk
+// Konfiguracja rejestru metryk
 const registry = new client.Registry();
-
-// Ustaw domyślne etykiety oraz zbieraj domyślne metryki
 registry.setDefaultLabels({ instance: 'cypress_jenkins' });
 client.collectDefaultMetrics({ register: registry });
 
-// Zdefiniuj niestandardowe liczniki
+// Definicja liczników oraz histogramu
 const testSuccessCounter = new client.Counter({
   name: 'cypress_test_success_total',
   help: 'Total number of successful Cypress tests',
@@ -32,13 +29,12 @@ const performanceNegativeCounter = new client.Counter({
   registers: [registry],
 });
 
-// Inicjalizacja liczników
+// Inicjalizacja liczników (opcjonalna – ustawienie startowych wartości)
 testSuccessCounter.inc(0);
 testFailureCounter.inc(0);
 performancePositiveCounter.inc(0);
 performanceNegativeCounter.inc(0);
 
-// Definicja histogramu dla czasów testów
 const testDurationHistogram = new client.Histogram({
   name: 'cypress_test_duration_seconds',
   help: 'Histogram of test durations in seconds',
@@ -46,44 +42,88 @@ const testDurationHistogram = new client.Histogram({
   registers: [registry],
 });
 
-// Funkcja pluginu Cypress (np. w pliku plugins/index.js)
-module.exports = (on, config) => {
-  on('after:run', async (results) => {
-    if (results) {
-      testSuccessCounter.inc(results.totalPassed);
-      testFailureCounter.inc(results.totalFailed);
-      let positivePerfIssues = 0;
-      let negativePerfIssues = 0;
-      if (results.runs && Array.isArray(results.runs)) {
-        results.runs.forEach(run => {
-          const duration = run.duration || 0;
-          // Rejestracja czasu testu (konwersja z milisekund na sekundy)
-          testDurationHistogram.observe(duration / 1000);
-          const isPositive = (process.env.LOGIN === 'student' && process.env.PASSWORD === 'Password123');
-          if (isPositive) {
-            if (duration > 4000) {
-              positivePerfIssues++;
-            }
-          } else {
-            if (run.state === 'passed' || duration < 1000) {
-              negativePerfIssues++;
-            }
-          }
-        });
+
+// Funkcja zapisująca metryki do pliku
+async function collectMetricsToFile(filePath) {
+  try {
+    const metrics = await registry.metrics();
+    fs.writeFileSync(filePath, metrics);
+    console.log('Metryki zapisane do pliku:', filePath);
+  } catch (err) {
+    console.error('Błąd przy zapisywaniu metryk do pliku:', err);
+  }
+}
+
+// Funkcja wyświetlająca metryki z pliku w konsoli
+function displayMetricsFromFile(filePath) {
+  try {
+    const data = fs.readFileSync(filePath, 'utf8');
+    console.log('Metryki odczytane z pliku:\n', data);
+  } catch (err) {
+    console.error('Błąd przy odczycie pliku z metrykami:', err);
+  }
+}
+
+// Funkcja pushująca metryki (odczytane z pliku) do Pushgateway
+function pushMetricsFromFile(filePath, pushgatewayUrl, jobName, groupingKey) {
+  try {
+    const metricsData = fs.readFileSync(filePath, 'utf8');
+    const url = new URL(pushgatewayUrl);
+    let path = `/metrics/job/${jobName}`;
+    if (groupingKey) {
+      for (const key in groupingKey) {
+        path += `/${encodeURIComponent(key)}/${encodeURIComponent(groupingKey[key])}`;
       }
-      performancePositiveCounter.inc(positivePerfIssues);
-      performanceNegativeCounter.inc(negativePerfIssues);
     }
-    return config;
-  });
-};
+    const options = {
+      hostname: url.hostname,
+      port: url.port || 80,
+      path: path,
+      method: 'PUT', // PUT nadpisuje poprzednie dane dla joba
+      headers: {
+        'Content-Type': 'text/plain',
+        'Content-Length': Buffer.byteLength(metricsData)
+      }
+    };
 
-// Uruchomienie serwera metryk
-app.get('/metrics', async (req, res) => {
-  res.set('Content-Type', registry.contentType);
-  res.end(await registry.metrics());
-});
+    const req = http.request(options, (res) => {
+      let responseData = '';
+      res.on('data', (chunk) => { responseData += chunk; });
+      res.on('end', () => {
+        console.log('Odpowiedź Pushgateway:', res.statusCode, responseData);
+      });
+    });
 
-app.listen(port, () => {
-  console.log(`Cypress metrics server is running on port ${port}`);
-});
+    req.on('error', (err) => {
+      console.error('Błąd przy wysyłaniu metryk:', err);
+    });
+
+    req.write(metricsData);
+    req.end();
+  } catch (err) {
+    console.error('Błąd przy odczycie pliku z metrykami do wysyłki:', err);
+  }
+}
+
+
+// Przykładowe użycie – symulacja aktualizacji metryk, zapis, wyświetlenie i push do Pushgateway
+(async () => {
+  // Symulacja aktualizacji metryk (w realnym przypadku licznik będzie zwiększany przez plugin testowy)
+  testSuccessCounter.inc(3);
+  testFailureCounter.inc(1);
+  testDurationHistogram.observe(2.34);
+  performancePositiveCounter.inc(1);
+  performanceNegativeCounter.inc(0);
+
+  const filePath = 'cypress_metrics.txt';
+  const pushgatewayUrl = 'http://localhost:9091';
+  const jobName = 'cypress_tests';
+  const groupingKey = { instance: 'cypress_jenkins' };
+
+  // Zbierz metryki i zapisz do pliku
+  await collectMetricsToFile(filePath);
+  // Wyświetl metryki z pliku
+  displayMetricsFromFile(filePath);
+  // Push metryki z pliku do Pushgateway
+  pushMetricsFromFile(filePath, pushgatewayUrl, jobName, groupingKey);
+})();

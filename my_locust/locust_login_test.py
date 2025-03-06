@@ -3,12 +3,16 @@
 locust_login_test.py
 
 This file runs a login test repeatedly using Locust and records Prometheus metrics.
-Instead of pushing metrics to Pushgateway, metrics are now exposed directly via an HTTP server.
+Instead of exposing metrics via an HTTP server, metrics are collected to a file,
+displayed in the console, and then pushed to Pushgateway.
 """
 
 import os
+import time
 from locust import HttpUser, TaskSet, task, between, events
-from prometheus_client import CollectorRegistry, Counter, Histogram, start_http_server, REGISTRY
+from prometheus_client import (
+    CollectorRegistry, Counter, Histogram, push_to_gateway, generate_latest, REGISTRY
+)
 from colorama import init
 
 # Initialize colorama
@@ -66,13 +70,54 @@ REQUEST_DURATION_HISTOGRAM = Histogram(
     const_labels={"instance": "locust_jenkins"}
 )
 
-# Uruchomienie serwera metryk podczas inicjalizacji Locusta
-@events.init.add_listener
-def on_locust_init(environment, **kwargs):
-    port = int(os.getenv("METRICS_PORT", "5000"))
-    start_http_server(port, registry=registry)
-    print(f"Locust metrics server is running on port {port}")
 
+# Funkcje do zbierania, wyświetlania i pushowania metryk
+
+def collect_metrics_to_file(file_path):
+    """
+    Generuje metryki z rejestru, zapisuje je do pliku
+    oraz wypisuje zawartość pliku w konsoli.
+    """
+    try:
+        metrics_data = generate_latest(registry).decode('utf-8')
+        with open(file_path, 'w') as f:
+            f.write(metrics_data)
+        print("Zebrane metryki zapisane do pliku:", file_path)
+        print("Zawartość pliku z metrykami:\n", metrics_data)
+    except Exception as e:
+        print("Błąd przy zbieraniu metryk:", e)
+
+
+def push_metrics_from_file(file_path):
+    """
+    Odczytuje metryki z pliku i pushuje je do Pushgateway.
+    """
+    try:
+        # Wczytaj metryki z pliku (opcjonalnie, tutaj pushujemy bezpośrednio z rejestru)
+        with open(file_path, 'r') as f:
+            _ = f.read()  # Możesz wykorzystać dane, jeśli potrzebujesz
+        pushgateway_address = os.getenv("PUSHGATEWAY_ADDRESS", "http://localhost:9091")
+        push_to_gateway(
+            pushgateway_address,
+            job="locust_tests",
+            grouping_key={"instance": "locust_jenkins"},
+            registry=registry
+        )
+        print("Metryki spushowane do Pushgateway:", pushgateway_address)
+    except Exception as e:
+        print("Błąd przy pushowaniu metryk:", e)
+
+
+def collect_and_push_metrics():
+    """
+    Zbiera metryki, zapisuje do pliku, wyświetla je i pushuje do Pushgateway.
+    """
+    file_path = "locust_metrics.txt"
+    collect_metrics_to_file(file_path)
+    push_metrics_from_file(file_path)
+
+
+# Listener zdarzenia dla rejestrowania metryk przy każdym żądaniu
 @events.request.add_listener
 def on_request(request_type, name, response_time, response_length, exception, **kwargs):
     # Rejestracja czasu trwania (przeliczamy ms na sekundy)
@@ -82,12 +127,13 @@ def on_request(request_type, name, response_time, response_length, exception, **
     else:
         REQUEST_FAILURE_COUNTER.labels(method=request_type, name=name, response_code="0").inc()
 
+
 class PracticeLoginScenario(TaskSet):
     @task
     def login_test(self):
         # 1. Load the login page.
         with self.client.get("/practice-test-login/", headers=HEADERS, catch_response=True,
-                               name="Load Login Page") as resp:
+                             name="Load Login Page") as resp:
             if resp.status_code == 200:
                 resp.success()
             else:
@@ -97,7 +143,7 @@ class PracticeLoginScenario(TaskSet):
         # 2. Attempt login.
         if USERNAME == "student" and PASSWORD == "Password123":
             with self.client.get("/logged-in-successfully/", headers=HEADERS, catch_response=True,
-                                   name="After Login Redirect") as r:
+                                 name="After Login Redirect") as r:
                 if r.status_code == 200 and ("Logged In Successfully" in r.text or "Congratulations" in r.text):
                     r.success()
                 else:
@@ -114,13 +160,27 @@ class PracticeLoginScenario(TaskSet):
 
         # 3. Logout/reset.
         with self.client.get("/practice-test-login/", headers=HEADERS, catch_response=True,
-                               name="Logout/Reset") as logout_resp:
+                             name="Logout/Reset") as logout_resp:
             if logout_resp.status_code == 200:
                 logout_resp.success()
             else:
                 logout_resp.failure(f"Failed to reset. Code: {logout_resp.status_code}")
 
+
 class WebsiteUser(HttpUser):
     host = LOCUST_HOST
     tasks = [PracticeLoginScenario]
     wait_time = between(1, 3)
+
+
+# Jeśli skrypt jest uruchamiany bezpośrednio – symulujemy czas trwania testów,
+# a następnie zbieramy i pushujemy metryki.
+if __name__ == '__main__':
+    print("Uruchamiamy testy Locust (symulacja).")
+    try:
+        # W realnym scenariuszu Locust uruchamia testy. Tutaj symulujemy pewien okres działania.
+        time.sleep(30)  # Symulacja 30 sekund działania testów
+    except KeyboardInterrupt:
+        pass
+    print("Testy zakończone. Zbieramy metryki...")
+    collect_and_push_metrics()
