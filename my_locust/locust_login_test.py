@@ -69,6 +69,7 @@ REQUEST_DURATION_HISTOGRAM = Histogram(
     const_labels={"instance": "locust_jenkins"}
 )
 
+
 # Funkcje do zbierania, wyświetlania i pushowania metryk
 
 def collect_metrics_to_file(file_path):
@@ -84,6 +85,7 @@ def collect_metrics_to_file(file_path):
         print("Zawartość pliku z metrykami:\n", metrics_data)
     except Exception as e:
         print("Błąd przy zbieraniu metryk:", e)
+
 
 def push_metrics_from_file(file_path):
     """
@@ -104,6 +106,7 @@ def push_metrics_from_file(file_path):
     except Exception as e:
         print("Błąd przy pushowaniu metryk:", e)
 
+
 def collect_and_push_metrics():
     """
     Zbiera metryki, zapisuje je do pliku, wyświetla i pushuje do Pushgateway.
@@ -111,6 +114,7 @@ def collect_and_push_metrics():
     file_path = "locust_metrics.txt"
     collect_metrics_to_file(file_path)
     push_metrics_from_file(file_path)
+
 
 # Listener dla każdego żądania - rejestruje metryki
 @events.request.add_listener
@@ -121,6 +125,7 @@ def on_request(request_type, name, response_time, response_length, exception, **
         REQUEST_SUCCESS_COUNTER.labels(method=request_type, name=name, response_code="200").inc()
     else:
         REQUEST_FAILURE_COUNTER.labels(method=request_type, name=name, response_code="0").inc()
+
 
 class PracticeLoginScenario(TaskSet):
     @task
@@ -160,10 +165,12 @@ class PracticeLoginScenario(TaskSet):
             else:
                 logout_resp.failure(f"Failed to reset. Code: {logout_resp.status_code}")
 
+
 class WebsiteUser(HttpUser):
     host = LOCUST_HOST
     tasks = [PracticeLoginScenario]
     wait_time = between(1, 3)
+
 
 # Listener, który po zakończeniu testów (gdy pipeline kończy Locusta) zbiera i pushuje metryki
 @events.test_stop.add_listener
