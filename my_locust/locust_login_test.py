@@ -8,7 +8,6 @@ displayed in the console, and then pushed to Pushgateway.
 """
 
 import os
-import time
 from locust import HttpUser, TaskSet, task, between, events
 from prometheus_client import (
     CollectorRegistry, Counter, Histogram, push_to_gateway, generate_latest, REGISTRY
@@ -70,7 +69,6 @@ REQUEST_DURATION_HISTOGRAM = Histogram(
     const_labels={"instance": "locust_jenkins"}
 )
 
-
 # Funkcje do zbierania, wyświetlania i pushowania metryk
 
 def collect_metrics_to_file(file_path):
@@ -87,15 +85,14 @@ def collect_metrics_to_file(file_path):
     except Exception as e:
         print("Błąd przy zbieraniu metryk:", e)
 
-
 def push_metrics_from_file(file_path):
     """
     Odczytuje metryki z pliku i pushuje je do Pushgateway.
     """
     try:
-        # Wczytaj metryki z pliku (opcjonalnie, tutaj pushujemy bezpośrednio z rejestru)
+        # Opcjonalnie: wczytanie zawartości pliku, jeśli potrzebujesz jej przetworzyć
         with open(file_path, 'r') as f:
-            _ = f.read()  # Możesz wykorzystać dane, jeśli potrzebujesz
+            _ = f.read()
         pushgateway_address = os.getenv("PUSHGATEWAY_ADDRESS", "http://localhost:9091")
         push_to_gateway(
             pushgateway_address,
@@ -107,26 +104,23 @@ def push_metrics_from_file(file_path):
     except Exception as e:
         print("Błąd przy pushowaniu metryk:", e)
 
-
 def collect_and_push_metrics():
     """
-    Zbiera metryki, zapisuje do pliku, wyświetla je i pushuje do Pushgateway.
+    Zbiera metryki, zapisuje je do pliku, wyświetla i pushuje do Pushgateway.
     """
     file_path = "locust_metrics.txt"
     collect_metrics_to_file(file_path)
     push_metrics_from_file(file_path)
 
-
-# Listener zdarzenia dla rejestrowania metryk przy każdym żądaniu
+# Listener dla każdego żądania - rejestruje metryki
 @events.request.add_listener
 def on_request(request_type, name, response_time, response_length, exception, **kwargs):
-    # Rejestracja czasu trwania (przeliczamy ms na sekundy)
+    # Zapisujemy czas trwania żądania (konwersja ms na sekundy)
     REQUEST_DURATION_HISTOGRAM.observe(response_time / 1000)
     if exception is None:
         REQUEST_SUCCESS_COUNTER.labels(method=request_type, name=name, response_code="200").inc()
     else:
         REQUEST_FAILURE_COUNTER.labels(method=request_type, name=name, response_code="0").inc()
-
 
 class PracticeLoginScenario(TaskSet):
     @task
@@ -166,21 +160,13 @@ class PracticeLoginScenario(TaskSet):
             else:
                 logout_resp.failure(f"Failed to reset. Code: {logout_resp.status_code}")
 
-
 class WebsiteUser(HttpUser):
     host = LOCUST_HOST
     tasks = [PracticeLoginScenario]
     wait_time = between(1, 3)
 
-
-# Jeśli skrypt jest uruchamiany bezpośrednio – symulujemy czas trwania testów,
-# a następnie zbieramy i pushujemy metryki.
-if __name__ == '__main__':
-    print("Uruchamiamy testy Locust (symulacja).")
-    try:
-        # W realnym scenariuszu Locust uruchamia testy. Tutaj symulujemy pewien okres działania.
-        time.sleep(30)  # Symulacja 30 sekund działania testów
-    except KeyboardInterrupt:
-        pass
-    print("Testy zakończone. Zbieramy metryki...")
+# Listener, który po zakończeniu testów (gdy pipeline kończy Locusta) zbiera i pushuje metryki
+@events.test_stop.add_listener
+def on_test_stop(environment, **kwargs):
+    print("Testy zakończone. Zbieramy i pushujemy metryki...")
     collect_and_push_metrics()
