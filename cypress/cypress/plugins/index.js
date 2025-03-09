@@ -76,6 +76,7 @@ function displayMetricsFromFile(filePath) {
 function pushMetricsFromFile(filePath, pushgatewayUrl, jobName, groupingKey) {
     try {
         console.log('>>> Próba pushowania metryk z pliku:', filePath);
+        console.log(`>>> Wysyłanie metryk do: ${pushgatewayUrl}`);
         if (!fs.existsSync(filePath)) {
             console.error('❌ Plik metryk nie istnieje! Pushowanie anulowane.');
             return;
