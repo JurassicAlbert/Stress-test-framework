@@ -7,7 +7,6 @@ Metrics are collected to a file, displayed in the console, and then pushed to Pu
 """
 
 import os
-import time
 from locust import HttpUser, TaskSet, task, between, events
 from prometheus_client import (
     CollectorRegistry, Counter, Histogram, push_to_gateway, generate_latest, REGISTRY
@@ -21,7 +20,7 @@ init(autoreset=True)
 LOCUST_HOST = os.getenv("LOCUST_HOST", "https://practicetestautomation.com")
 USERNAME = os.getenv("LOCUST_USERNAME", "student")
 PASSWORD = os.getenv("LOCUST_PASSWORD", "Password123")
-PUSHGATEWAY_ADDRESS = os.getenv("PUSHGATEWAY_ADDRESS", "http://localhost:9091")
+PUSHGATEWAY_ADDRESS = os.getenv("PUSHGATEWAY_ADDRESS", "http://localhost:9091").rstrip("/")
 
 # Nagłówki symulujące przeglądarkę
 HEADERS = {
@@ -35,14 +34,14 @@ HEADERS = {
 # Utwórz własny rejestr metryk
 registry = CollectorRegistry(auto_describe=False)
 
-# Odczepienie domyślnych kolektorów
+# Odczepienie domyślnych kolektorów Prometheus
 for collector in list(REGISTRY._collector_to_names.keys()):
     try:
         REGISTRY.unregister(collector)
     except Exception as e:
         print(f"⚠️ Nie udało się odczepić kolektora: {e}")
 
-# Definicja liczników z etykietami stałymi
+# Definicja liczników i histogramu
 REQUEST_SUCCESS_COUNTER = Counter(
     "locust_request_success_total",
     "Total successful requests",
@@ -61,7 +60,6 @@ REQUEST_FAILURE_COUNTER = Counter(
 )
 REQUEST_FAILURE_COUNTER.inc(0)
 
-# Definicja histogramu dla czasów odpowiedzi
 REQUEST_DURATION_HISTOGRAM = Histogram(
     "locust_request_duration_seconds",
     "Histogram of request durations in seconds",
@@ -79,12 +77,17 @@ def collect_metrics_to_file(file_path):
     try:
         print(f">>> Próba zapisu metryk do pliku: {file_path}")
         metrics_data = generate_latest(registry).decode('utf-8')
+
         with open(file_path, 'w') as f:
             f.write(metrics_data)
+
         print(f"✅ Metryki zapisane do pliku: {file_path}")
 
         if os.path.exists(file_path):
             print(f"✅ Plik metryk istnieje: {file_path}")
+            print(f"📄 Zawartość pliku metryk:")
+            with open(file_path, 'r') as f:
+                print(f.read())
         else:
             print(f"❌ Plik metryk NIE został utworzony!")
 
@@ -173,16 +176,6 @@ class PracticeLoginScenario(TaskSet):
                 response_length=0,
                 exception=Exception(error_msg)
             )
-
-        # 3. Logout/reset.
-        with self.client.get("/practice-test-login/", headers=HEADERS, catch_response=True,
-                             name="Logout/Reset") as logout_resp:
-            if logout_resp.status_code == 200:
-                print("✅ Logout/reset successful.")
-                logout_resp.success()
-            else:
-                print(f"❌ Failed to reset. Code: {logout_resp.status_code}")
-                logout_resp.failure(f"Failed to reset. Code: {logout_resp.status_code}")
 
 class WebsiteUser(HttpUser):
     host = LOCUST_HOST
