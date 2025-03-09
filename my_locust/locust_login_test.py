@@ -45,31 +45,27 @@ for collector in list(REGISTRY._collector_to_names.keys()):
     except Exception as e:
         print(f"⚠️ Nie udało się odczepić kolektora: {e}")
 
-# Definicja liczników i histogramu
+# Definicja liczników i histogramu (bez const_labels!)
 REQUEST_SUCCESS_COUNTER = Counter(
     "locust_request_success_total",
     "Total successful requests",
-    ["method", "name", "response_code"],
-    registry=registry,
-    const_labels={"instance": "locust_jenkins"}
+    ["method", "name", "response_code", "instance"],
+    registry=registry
 )
-REQUEST_SUCCESS_COUNTER.inc(0)
 
 REQUEST_FAILURE_COUNTER = Counter(
     "locust_request_failure_total",
     "Total failed requests",
-    ["method", "name", "response_code"],
-    registry=registry,
-    const_labels={"instance": "locust_jenkins"}
+    ["method", "name", "response_code", "instance"],
+    registry=registry
 )
-REQUEST_FAILURE_COUNTER.inc(0)
 
 REQUEST_DURATION_HISTOGRAM = Histogram(
     "locust_request_duration_seconds",
     "Histogram of request durations in seconds",
+    ["instance"],   # Możesz dodać też np. ["instance","method","name"] jeśli chcesz bardziej szczegółowe metryki
     buckets=[0.1, 0.3, 1.5, 10.0],
-    registry=registry,
-    const_labels={"instance": "locust_jenkins"}
+    registry=registry
 )
 
 # Funkcja do zbierania metryk i zapisu do pliku
@@ -110,11 +106,24 @@ def push_metrics_from_file(file_path):
 # Listener dla każdego żądania
 @events.request.add_listener
 def on_request(request_type, name, response_time, response_length, exception, **kwargs):
-    REQUEST_DURATION_HISTOGRAM.observe(response_time / 1000)
+    # Najpierw rejestrujemy czas trwania (tu, tylko per 'instance'),
+    # ale w razie potrzeby możesz dodać 'request_type' lub 'name' do etykiet.
+    REQUEST_DURATION_HISTOGRAM.labels(instance="locust_jenkins").observe(response_time / 1000)
+
     if exception is None:
-        REQUEST_SUCCESS_COUNTER.labels(method=request_type, name=name, response_code="200").inc()
+        REQUEST_SUCCESS_COUNTER.labels(
+            method=request_type,
+            name=name,
+            response_code="200",
+            instance="locust_jenkins"
+        ).inc()
     else:
-        REQUEST_FAILURE_COUNTER.labels(method=request_type, name=name, response_code="0").inc()
+        REQUEST_FAILURE_COUNTER.labels(
+            method=request_type,
+            name=name,
+            response_code="0",
+            instance="locust_jenkins"
+        ).inc()
 
 class PracticeLoginScenario(TaskSet):
     @task

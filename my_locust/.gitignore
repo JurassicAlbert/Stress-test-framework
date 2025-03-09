@@ -6,7 +6,7 @@
 __pycache__/
 *.py[cod]
 *$py.class
-
+locust_metrics.txt
 # C extensions
 *.so
 
