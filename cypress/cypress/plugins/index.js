@@ -4,8 +4,8 @@ const client = require('prom-client');
 
 // Konfiguracja rejestru metryk
 const registry = new client.Registry();
-registry.setDefaultLabels({instance: 'cypress_jenkins'});
-client.collectDefaultMetrics({register: registry});
+registry.setDefaultLabels({ instance: 'cypress_jenkins' });
+client.collectDefaultMetrics({ register: registry });
 
 // Definicja liczników oraz histogramu
 const testSuccessCounter = new client.Counter({
@@ -29,7 +29,7 @@ const performanceNegativeCounter = new client.Counter({
     registers: [registry],
 });
 
-// Inicjalizacja liczników (opcjonalna – ustawienie startowych wartości)
+// Inicjalizacja liczników
 testSuccessCounter.inc(0);
 testFailureCounter.inc(0);
 performancePositiveCounter.inc(0);
@@ -45,27 +45,42 @@ const testDurationHistogram = new client.Histogram({
 // Funkcja zapisująca metryki do pliku
 async function collectMetricsToFile(filePath) {
     try {
+        console.log('>>> Próba zapisu metryk do pliku:', filePath);
         const metrics = await registry.metrics();
         fs.writeFileSync(filePath, metrics);
-        console.log('Metryki zapisane do pliku:', filePath);
+        console.log('✅ Metryki zapisane do pliku:', filePath);
+
+        // Sprawdzenie, czy plik istnieje
+        if (fs.existsSync(filePath)) {
+            console.log('✅ Plik metryk istnieje:', filePath);
+        } else {
+            console.error('❌ Plik metryk NIE został utworzony!');
+        }
     } catch (err) {
-        console.error('Błąd przy zapisywaniu metryk do pliku:', err);
+        console.error('❌ Błąd przy zapisywaniu metryk do pliku:', err);
     }
 }
 
 // Funkcja wyświetlająca metryki z pliku w konsoli
 function displayMetricsFromFile(filePath) {
     try {
+        console.log('>>> Próba odczytu metryk z pliku:', filePath);
         const data = fs.readFileSync(filePath, 'utf8');
-        console.log('Metryki odczytane z pliku:\n', data);
+        console.log('✅ Metryki odczytane z pliku:\n', data);
     } catch (err) {
-        console.error('Błąd przy odczycie pliku z metrykami:', err);
+        console.error('❌ Błąd przy odczycie pliku z metrykami:', err);
     }
 }
 
-// Funkcja pushująca metryki (odczytane z pliku) do Pushgateway
+// Funkcja pushująca metryki do Pushgateway
 function pushMetricsFromFile(filePath, pushgatewayUrl, jobName, groupingKey) {
     try {
+        console.log('>>> Próba pushowania metryk z pliku:', filePath);
+        if (!fs.existsSync(filePath)) {
+            console.error('❌ Plik metryk nie istnieje! Pushowanie anulowane.');
+            return;
+        }
+
         const metricsData = fs.readFileSync(filePath, 'utf8');
         const url = new URL(pushgatewayUrl);
         let path = `/metrics/job/${jobName}`;
@@ -78,11 +93,11 @@ function pushMetricsFromFile(filePath, pushgatewayUrl, jobName, groupingKey) {
             hostname: url.hostname,
             port: url.port || 80,
             path: path,
-            method: 'PUT', // PUT nadpisuje poprzednie dane dla joba
+            method: 'PUT',
             headers: {
                 'Content-Type': 'text/plain',
-                'Content-Length': Buffer.byteLength(metricsData)
-            }
+                'Content-Length': Buffer.byteLength(metricsData),
+            },
         };
 
         const req = http.request(options, (res) => {
@@ -91,24 +106,24 @@ function pushMetricsFromFile(filePath, pushgatewayUrl, jobName, groupingKey) {
                 responseData += chunk;
             });
             res.on('end', () => {
-                console.log('Odpowiedź Pushgateway:', res.statusCode, responseData);
+                console.log('✅ Odpowiedź Pushgateway:', res.statusCode, responseData);
             });
         });
 
         req.on('error', (err) => {
-            console.error('Błąd przy wysyłaniu metryk:', err);
+            console.error('❌ Błąd przy wysyłaniu metryk:', err);
         });
 
         req.write(metricsData);
         req.end();
     } catch (err) {
-        console.error('Błąd przy odczycie pliku z metrykami do wysyłki:', err);
+        console.error('❌ Błąd przy odczycie pliku z metrykami do wysyłki:', err);
     }
 }
 
-// Przykładowe użycie – symulacja aktualizacji metryk, zapis, wyświetlenie i push do Pushgateway
+// Symulacja aktualizacji metryk, zapis, wyświetlenie i push do Pushgateway
 (async () => {
-    // Symulacja aktualizacji metryk (w realnym przypadku licznik będzie zwiększany przez plugin testowy)
+    console.log('>>> Aktualizacja liczników Cypress...');
     testSuccessCounter.inc(3);
     testFailureCounter.inc(1);
     testDurationHistogram.observe(2.34);
@@ -116,15 +131,11 @@ function pushMetricsFromFile(filePath, pushgatewayUrl, jobName, groupingKey) {
     performanceNegativeCounter.inc(0);
 
     const filePath = 'cypress_metrics.txt';
-    // Użycie zmiennej środowiskowej PUSHGATEWAY_ADDRESS lub domyślna wartość
     const pushgatewayUrl = process.env.PUSHGATEWAY_ADDRESS || 'http://localhost:9091';
     const jobName = 'cypress_tests';
-    const groupingKey = {instance: 'cypress_jenkins'};
+    const groupingKey = { instance: 'cypress_jenkins' };
 
-    // Zbierz metryki i zapisz do pliku
     await collectMetricsToFile(filePath);
-    // Wyświetl metryki z pliku
     displayMetricsFromFile(filePath);
-    // Push metryki z pliku do Pushgateway
     pushMetricsFromFile(filePath, pushgatewayUrl, jobName, groupingKey);
 })();
