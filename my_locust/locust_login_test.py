@@ -94,6 +94,8 @@ def collect_metrics_to_file(file_path):
     except Exception as e:
         print(f"❌ Błąd przy zbieraniu metryk: {e}")
 
+import os
+
 def push_metrics_from_file(file_path):
     """
     Odczytuje metryki z pliku i pushuje je do Pushgateway.
@@ -103,6 +105,10 @@ def push_metrics_from_file(file_path):
         if not os.path.exists(file_path):
             print(f"❌ Plik {file_path} nie istnieje, pushowanie anulowane.")
             return
+
+        print(f">>> Wyświetlam zawartość pliku metryk przed pushowaniem:")
+        with open(file_path, 'r') as f:
+            print(f.read())
 
         print(f">>> Próba pushowania metryk do {PUSHGATEWAY_ADDRESS} z pliku: {file_path}")
         push_to_gateway(
