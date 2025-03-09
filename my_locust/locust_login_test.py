@@ -72,49 +72,31 @@ REQUEST_DURATION_HISTOGRAM = Histogram(
     const_labels={"instance": "locust_jenkins"}
 )
 
-# Funkcje do zbierania, wyświetlania i pushowania metryk
+# Funkcja do zbierania metryk i zapisu do pliku
 def collect_metrics_to_file(file_path):
-    """
-    Generuje metryki z rejestru, zapisuje je do pliku
-    oraz wypisuje zawartość pliku w konsoli.
-    """
     try:
-        print(f">>> Próba zapisu metryk do pliku: {file_path}")
+        print(f"🔍 Próba zapisu metryk do pliku: {file_path}")
         metrics_data = generate_latest(registry).decode('utf-8')
-
         print(f"📊 Metryki do zapisania:\n{metrics_data}")
 
         with open(file_path, 'w') as f:
             f.write(metrics_data)
-
         print(f"✅ Metryki zapisane do pliku: {file_path}")
-
-        if os.path.exists(file_path):
-            print(f"✅ Plik metryk istnieje: {file_path}")
-            print(f"📄 Zawartość pliku metryk:")
-            with open(file_path, 'r') as f:
-                print(f.read())
-        else:
-            print(f"❌ Plik metryk NIE został utworzony!")
-
     except Exception as e:
         print(f"❌ Błąd przy zbieraniu metryk: {e}")
 
+# Funkcje do pushowania metryk
 def push_metrics_from_file(file_path):
-    """
-    Odczytuje metryki z pliku i pushuje je do Pushgateway.
-    """
     try:
-        print(f">>> Sprawdzam, czy plik metryk istnieje: {file_path}")
+        print(f"Sprawdzam, czy plik metryk istnieje: {file_path}")
         if not os.path.exists(file_path):
             print(f"❌ Plik {file_path} nie istnieje, pushowanie anulowane.")
             return
 
-        print(f">>> Wyświetlam zawartość pliku metryk przed pushowaniem:")
+        print(f"Wyświetlam zawartość pliku metryk przed pushowaniem:")
         with open(file_path, 'r') as f:
             print(f.read())
 
-        print(f">>> Próba pushowania metryk do {PUSHGATEWAY_ADDRESS} z pliku: {file_path}")
         push_to_gateway(
             PUSHGATEWAY_ADDRESS,
             job="locust_tests",
@@ -122,78 +104,43 @@ def push_metrics_from_file(file_path):
             registry=registry
         )
         print(f"✅ Metryki spushowane do Pushgateway: {PUSHGATEWAY_ADDRESS}")
-
     except Exception as e:
         print(f"❌ Błąd przy pushowaniu metryk: {e}")
 
-def collect_and_push_metrics():
-    """
-    Zbiera metryki, zapisuje je do pliku, wyświetla i pushuje do Pushgateway.
-    """
-    file_path = "locust_metrics.txt"
-    collect_metrics_to_file(file_path)
-    push_metrics_from_file(file_path)
-
-# Listener dla każdego żądania - rejestruje metryki
+# Listener dla każdego żądania
 @events.request.add_listener
 def on_request(request_type, name, response_time, response_length, exception, **kwargs):
-    """
-    Obsługuje metryki dla każdego requesta.
-    """
-    print(f">>> Rejestrowanie żądania: {request_type} - {name} (czas: {response_time}ms)")
-
     REQUEST_DURATION_HISTOGRAM.observe(response_time / 1000)
-
     if exception is None:
         REQUEST_SUCCESS_COUNTER.labels(method=request_type, name=name, response_code="200").inc()
     else:
-        print(f"⚠️ Wystąpił błąd podczas żądania: {exception}")
         REQUEST_FAILURE_COUNTER.labels(method=request_type, name=name, response_code="0").inc()
 
 class PracticeLoginScenario(TaskSet):
     @task
     def login_test(self):
-        print(">>> Rozpoczynam test logowania...")
-
-        # 1. Load the login page.
         with self.client.get("/practice-test-login/", headers=HEADERS, catch_response=True,
                              name="Load Login Page") as resp:
             if resp.status_code == 200:
-                print("✅ Login page loaded successfully.")
                 resp.success()
             else:
-                print(f"❌ Failed to load login page. Code: {resp.status_code}")
                 resp.failure(f"Failed to load login page. Code: {resp.status_code}")
                 return
 
-        # 2. Attempt login.
-        if USERNAME == "student" and PASSWORD == "Password123":
-            with self.client.get("/logged-in-successfully/", headers=HEADERS, catch_response=True,
-                                 name="After Login Redirect") as r:
-                if r.status_code == 200 and ("Logged In Successfully" in r.text or "Congratulations" in r.text):
-                    print("✅ Login successful!")
-                    r.success()
-                else:
-                    print(f"❌ Unexpected login result. Code: {r.status_code}")
-                    r.failure(f"Unexpected login result. Code: {r.status_code}")
-        else:
-            error_msg = "Your username is invalid!" if USERNAME != "student" else "Your password is invalid!"
-            print(f"❌ Login failed: {error_msg}")
-            self.environment.events.request.fire(
-                request_type="GET",
-                name="Login Attempt",
-                response_time=0,
-                response_length=0,
-                exception=Exception(error_msg)
-            )
+        with self.client.get("/logged-in-successfully/", headers=HEADERS, catch_response=True,
+                             name="After Login Redirect") as r:
+            if r.status_code == 200 and ("Logged In Successfully" in r.text or "Congratulations" in r.text):
+                r.success()
+            else:
+                r.failure(f"Unexpected login result. Code: {r.status_code}")
 
 class WebsiteUser(HttpUser):
     host = LOCUST_HOST
     tasks = [PracticeLoginScenario]
     wait_time = between(1, 3)
 
-# Listener, który po zakończeniu testów (gdy pipeline kończy Locusta) zbiera i pushuje metryki
 @events.test_stop.add_listener
 def on_test_stop(environment, **kwargs):
-    print(">>> Testy zakończone. Zbieramy i pushujemy metryki...")
-    collect_and_push_metrics()
+    file_path = "locust_metrics.txt"
+    collect_metrics_to_file(file_path)
+    push_metrics_from_file(file_path)
