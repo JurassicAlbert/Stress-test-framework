@@ -22,6 +22,10 @@ USERNAME = os.getenv("LOCUST_USERNAME", "student")
 PASSWORD = os.getenv("LOCUST_PASSWORD", "Password123")
 PUSHGATEWAY_ADDRESS = os.getenv("PUSHGATEWAY_ADDRESS", "http://localhost:9091").rstrip("/")
 
+# Debugowanie zmiennych środowiskowych
+print(f"🔍 LOCUST_HOST: {LOCUST_HOST}")
+print(f"🔍 PUSHGATEWAY_ADDRESS: {PUSHGATEWAY_ADDRESS}")
+
 # Nagłówki symulujące przeglądarkę
 HEADERS = {
     "User-Agent": (
@@ -78,6 +82,8 @@ def collect_metrics_to_file(file_path):
         print(f">>> Próba zapisu metryk do pliku: {file_path}")
         metrics_data = generate_latest(registry).decode('utf-8')
 
+        print(f"📊 Metryki do zapisania:\n{metrics_data}")
+
         with open(file_path, 'w') as f:
             f.write(metrics_data)
 
@@ -93,8 +99,6 @@ def collect_metrics_to_file(file_path):
 
     except Exception as e:
         print(f"❌ Błąd przy zbieraniu metryk: {e}")
-
-import os
 
 def push_metrics_from_file(file_path):
     """
