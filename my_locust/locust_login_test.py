@@ -3,11 +3,11 @@
 locust_login_test.py
 
 This file runs a login test repeatedly using Locust and records Prometheus metrics.
-Instead of exposing metrics via an HTTP server, metrics are collected to a file,
-displayed in the console, and then pushed to Pushgateway.
+Metrics are collected to a file, displayed in the console, and then pushed to Pushgateway.
 """
 
 import os
+import time
 from locust import HttpUser, TaskSet, task, between, events
 from prometheus_client import (
     CollectorRegistry, Counter, Histogram, push_to_gateway, generate_latest, REGISTRY
@@ -21,6 +21,7 @@ init(autoreset=True)
 LOCUST_HOST = os.getenv("LOCUST_HOST", "https://practicetestautomation.com")
 USERNAME = os.getenv("LOCUST_USERNAME", "student")
 PASSWORD = os.getenv("LOCUST_PASSWORD", "Password123")
+PUSHGATEWAY_ADDRESS = os.getenv("PUSHGATEWAY_ADDRESS", "http://localhost:9091")
 
 # Nagłówki symulujące przeglądarkę
 HEADERS = {
@@ -39,7 +40,7 @@ for collector in list(REGISTRY._collector_to_names.keys()):
     try:
         REGISTRY.unregister(collector)
     except Exception as e:
-        print("Nie udało się odczepić kolektora:", e)
+        print(f"⚠️ Nie udało się odczepić kolektora: {e}")
 
 # Definicja liczników z etykietami stałymi
 REQUEST_SUCCESS_COUNTER = Counter(
@@ -69,7 +70,6 @@ REQUEST_DURATION_HISTOGRAM = Histogram(
     const_labels={"instance": "locust_jenkins"}
 )
 
-
 # Funkcje do zbierania, wyświetlania i pushowania metryk
 def collect_metrics_to_file(file_path):
     """
@@ -91,29 +91,27 @@ def collect_metrics_to_file(file_path):
     except Exception as e:
         print(f"❌ Błąd przy zbieraniu metryk: {e}")
 
-
 def push_metrics_from_file(file_path):
     """
     Odczytuje metryki z pliku i pushuje je do Pushgateway.
     """
     try:
+        print(f">>> Sprawdzam, czy plik metryk istnieje: {file_path}")
         if not os.path.exists(file_path):
             print(f"❌ Plik {file_path} nie istnieje, pushowanie anulowane.")
             return
 
-        pushgateway_address = os.getenv("PUSHGATEWAY_ADDRESS", "http://localhost:9091")
-        print(f">>> Próba pushowania metryk do {pushgateway_address} z pliku: {file_path}")
-
+        print(f">>> Próba pushowania metryk do {PUSHGATEWAY_ADDRESS} z pliku: {file_path}")
         push_to_gateway(
-            pushgateway_address,
+            PUSHGATEWAY_ADDRESS,
             job="locust_tests",
             grouping_key={"instance": "locust_jenkins"},
             registry=registry
         )
-        print(f"✅ Metryki spushowane do Pushgateway: {pushgateway_address}")
+        print(f"✅ Metryki spushowane do Pushgateway: {PUSHGATEWAY_ADDRESS}")
+
     except Exception as e:
         print(f"❌ Błąd przy pushowaniu metryk: {e}")
-
 
 def collect_and_push_metrics():
     """
@@ -123,21 +121,21 @@ def collect_and_push_metrics():
     collect_metrics_to_file(file_path)
     push_metrics_from_file(file_path)
 
-
 # Listener dla każdego żądania - rejestruje metryki
 @events.request.add_listener
 def on_request(request_type, name, response_time, response_length, exception, **kwargs):
     """
     Obsługuje metryki dla każdego requesta.
     """
-    print(f">>> Rejestrowanie żądania: {request_type} - {name}")
+    print(f">>> Rejestrowanie żądania: {request_type} - {name} (czas: {response_time}ms)")
+
     REQUEST_DURATION_HISTOGRAM.observe(response_time / 1000)
 
     if exception is None:
         REQUEST_SUCCESS_COUNTER.labels(method=request_type, name=name, response_code="200").inc()
     else:
+        print(f"⚠️ Wystąpił błąd podczas żądania: {exception}")
         REQUEST_FAILURE_COUNTER.labels(method=request_type, name=name, response_code="0").inc()
-
 
 class PracticeLoginScenario(TaskSet):
     @task
@@ -186,12 +184,10 @@ class PracticeLoginScenario(TaskSet):
                 print(f"❌ Failed to reset. Code: {logout_resp.status_code}")
                 logout_resp.failure(f"Failed to reset. Code: {logout_resp.status_code}")
 
-
 class WebsiteUser(HttpUser):
     host = LOCUST_HOST
     tasks = [PracticeLoginScenario]
     wait_time = between(1, 3)
-
 
 # Listener, który po zakończeniu testów (gdy pipeline kończy Locusta) zbiera i pushuje metryki
 @events.test_stop.add_listener
