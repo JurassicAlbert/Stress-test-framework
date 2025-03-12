@@ -84,6 +84,8 @@ def run_login_test(driver):
         try:
             driver.get("https://practicetestautomation.com/practice-test-login/")
             wait.until(EC.presence_of_element_located((By.ID, "username")))
+
+            # Wpisywanie danych do formularza
             driver.find_element(By.ID, "username").clear()
             driver.find_element(By.ID, "username").send_keys(LOGIN)
             driver.find_element(By.ID, "password").clear()
@@ -92,6 +94,7 @@ def run_login_test(driver):
             time.sleep(2)
             current_url = driver.current_url
 
+            # --- SCENARIUSZ POZYTYWNY ---
             if LOGIN == "student" and PASSWORD == "Password123":
                 if "logged-in-successfully" not in current_url:
                     TEST_FAILURE_COUNTER.inc()
@@ -102,6 +105,7 @@ def run_login_test(driver):
                         TEST_FAILURE_COUNTER.inc()
                         failures.append(f"Iteration {i + 1}: Missing success message.")
                     else:
+                        # Próbujemy znaleźć przycisk "Log out"
                         try:
                             logout_button = wait.until(
                                 EC.visibility_of_element_located((By.XPATH, "//*[contains(text(),'Log out')]"))
@@ -111,22 +115,29 @@ def run_login_test(driver):
                                 time.sleep(2)
                                 if "practice-test-login" not in driver.current_url:
                                     TEST_FAILURE_COUNTER.inc()
-                                    failures.append(f"Iteration {i + 1}: Failed to return to login page after logout.")
+                                    failures.append(
+                                        f"Iteration {i + 1}: Failed to return to login page after logout."
+                                    )
                                 else:
                                     TEST_SUCCESS_COUNTER.inc()
                             else:
                                 TEST_FAILURE_COUNTER.inc()
                                 failures.append(f"Iteration {i + 1}: 'Log out' button not visible.")
-                        except Exception as ex:
+                        except Exception as e:
                             TEST_FAILURE_COUNTER.inc()
-                            failures.append(f"Iteration {i + 1}: Error during logout: {ex}")
+                            failures.append(f"Iteration {i + 1}: Exception while clicking logout button: {e}")
+
+                # Sprawdzenie czasu wykonania
                 duration = time.time() * 1000 - iteration_start
                 if duration > 4000:
                     positive_perf_issues += 1
+
+            # --- SCENARIUSZ NEGATYWNY ---
             else:
                 if "logged-in-successfully" in current_url:
                     TEST_FAILURE_COUNTER.inc()
                     failures.append(f"Iteration {i + 1}: Unexpected login with invalid credentials.")
+                    # Spróbuj się wylogować, jeśli przycisk się pojawi
                     try:
                         logout_button = wait.until(
                             EC.visibility_of_element_located((By.XPATH, "//*[contains(text(),'Log out')]"))
@@ -140,35 +151,46 @@ def run_login_test(driver):
                     error_elem = wait.until(EC.visibility_of_element_located((By.ID, "error")))
                     error_text = error_elem.text.strip()
                     if error_text and (
-                            "Your username is invalid!" in error_text or "Your password is invalid!" in error_text):
+                        "Your username is invalid!" in error_text or
+                        "Your password is invalid!" in error_text
+                    ):
                         TEST_SUCCESS_COUNTER.inc()
                     else:
                         TEST_FAILURE_COUNTER.inc()
                         failures.append(f"Iteration {i + 1}: Unexpected error message: {error_text}")
+
+                # Sprawdzenie czasu wykonania
                 duration = time.time() * 1000 - iteration_start
                 if duration < 1000:
                     negative_perf_issues += 1
+
         except Exception as e:
             TEST_FAILURE_COUNTER.inc()
             failures.append(f"Iteration {i + 1}: Exception: {e}")
 
+    # Zliczanie „performance issues”
     PERFORMANCE_POSITIVE_COUNTER.inc(positive_perf_issues)
     PERFORMANCE_NEGATIVE_COUNTER.inc(negative_perf_issues)
+
     overall_duration = time.time() * 1000 - overall_start
     return failures, overall_duration
 
 
 def main():
     chrome_options = Options()
-    chrome_options.add_argument("--headless")
+    # Dodatkowe argumenty dla uruchomienia w trybie headless
+    chrome_options.add_argument("--headless")  # Można użyć "--headless=new" (dla Chrome 109+)
     chrome_options.add_argument("--disable-gpu")
+    chrome_options.add_argument("--disable-dev-shm-usage")  # uniknięcie małej partycji /dev/shm
+    chrome_options.add_argument("--no-sandbox")  # wyłącza sandbox, wymagane w niektórych środowiskach
+
     driver = webdriver.Chrome(options=chrome_options)
     try:
         failures, overall_duration = run_login_test(driver)
     finally:
         driver.quit()
 
-    # Zamiast pushowania bezpośrednio, eksportujemy metryki do pliku, jeśli przekazano --export-metrics.
+    # Eksport metryk do pliku, jeśli użyto --export-metrics
     if args.export_metrics:
         metrics_output = generate_latest(registry).decode("utf-8")
         with open(args.metrics_file, "w", encoding="utf-8") as f:
@@ -177,6 +199,13 @@ def main():
     else:
         print("[INFO] Metrics were not exported to file (push not implemented).")
 
+    # Możesz wypisać ewentualne błędy
+    if failures:
+        print("[ERROR] Test failures:")
+        for fail in failures:
+            print(" -", fail)
+
+    print(f"[INFO] Overall test duration: {overall_duration:.2f} ms")
     sys.exit(0)
 
 
