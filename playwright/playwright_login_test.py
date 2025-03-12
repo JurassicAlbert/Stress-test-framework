@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 playwright_login_test.py
-Zmodyfikowany tak, aby:
+Skrypt:
   - Na koniec generować plik z metrykami (jeśli podano --export-metrics),
   - NIE pushować metryk bezpośrednio do Pushgateway,
   - Zamiast tego pozwala pipeline'owi wykonać curl na gotowy plik.

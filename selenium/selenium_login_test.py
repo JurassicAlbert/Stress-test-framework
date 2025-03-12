@@ -2,7 +2,7 @@
 """
 selenium_login_test.py
 
-Zmodyfikowany skrypt Selenium, który:
+Skrypt Selenium, który:
   - Definiuje metryki i rejestr,
   - Inicjalizuje liczniki i aktualizuje ich wartości na podstawie wyników testów,
   - Na końcu, jeśli przekazano flagę --export-metrics, zapisuje metryki do pliku,
@@ -73,7 +73,11 @@ def run_login_test(driver):
     i przycisku "Log out". W scenariuszu negatywnym (błędne dane) oczekujemy komunikatu o błędzie.
     Aktualizujemy liczniki sukcesów, porażek oraz "performance issues".
     """
+    # Główny, dłuższy wait (np. do 10s) – w razie wolniejszych odpowiedzi
     wait = WebDriverWait(driver, 10)
+    # Krótszy wait (np. do 2s) – zamiast time.sleep(2)
+    short_wait = WebDriverWait(driver, 2)
+
     positive_perf_issues = 0
     negative_perf_issues = 0
     failures = []
@@ -91,7 +95,21 @@ def run_login_test(driver):
             driver.find_element(By.ID, "password").clear()
             driver.find_element(By.ID, "password").send_keys(PASSWORD)
             driver.find_element(By.ID, "submit").click()
-            time.sleep(2)
+
+            # Zamiast stałego sleep(2), czekamy do 2s aż strona się przeładuje:
+            # - albo URL zawiera "logged-in-successfully" (scenariusz pozytywny),
+            # - albo pojawi się element błędu (scenariusz negatywny).
+            try:
+                short_wait.until(
+                    EC.any_of(
+                        EC.url_contains("logged-in-successfully"),
+                        EC.visibility_of_element_located((By.ID, "error"))
+                    )
+                )
+            except:
+                # Jeśli w ciągu 2s nie pojawi się nic z powyższych, przechodzimy dalej
+                pass
+
             current_url = driver.current_url
 
             # --- SCENARIUSZ POZYTYWNY ---
@@ -112,7 +130,12 @@ def run_login_test(driver):
                             )
                             if logout_button:
                                 logout_button.click()
-                                time.sleep(2)
+                                # Zamiast stałego sleep(2), czekamy do 2s aż URL wróci do login page
+                                try:
+                                    short_wait.until(lambda d: "practice-test-login" in d.current_url)
+                                except:
+                                    pass
+
                                 if "practice-test-login" not in driver.current_url:
                                     TEST_FAILURE_COUNTER.inc()
                                     failures.append(
@@ -144,7 +167,11 @@ def run_login_test(driver):
                         )
                         if logout_button:
                             logout_button.click()
-                            time.sleep(2)
+                            # Zamiast stałego sleep(2), krótkie oczekiwanie
+                            try:
+                                short_wait.until(lambda d: "practice-test-login" in d.current_url)
+                            except:
+                                pass
                     except Exception:
                         pass
                 else:
