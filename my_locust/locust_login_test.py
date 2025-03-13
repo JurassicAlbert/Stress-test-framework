@@ -2,31 +2,31 @@
 """
 locust_login_test.py
 
-This file runs a login test repeatedly using Locust and records Prometheus metrics.
-Metrics are collected to a file, displayed in the console, and then pushed to Pushgateway.
+Dodaje dwie dodatkowe metryki do obserwacji zużycia CPU i RAM przez Locusta.
+Wymaga zainstalowania pakietu 'psutil':
+   pip install psutil
 """
 
 import os
+import psutil
 from locust import HttpUser, TaskSet, task, between, events
 from prometheus_client import (
-    CollectorRegistry, Counter, Histogram, push_to_gateway, generate_latest, REGISTRY
+    CollectorRegistry, Counter, Histogram, Gauge,
+    push_to_gateway, generate_latest, REGISTRY
 )
 from colorama import init
 
 # Initialize colorama
 init(autoreset=True)
 
-# Ustawienia hosta i danych logowania
 LOCUST_HOST = os.getenv("LOCUST_HOST", "https://practicetestautomation.com")
 USERNAME = os.getenv("LOCUST_USERNAME", "student")
 PASSWORD = os.getenv("LOCUST_PASSWORD", "Password123")
 PUSHGATEWAY_ADDRESS = os.getenv("PUSHGATEWAY_ADDRESS", "http://localhost:9091").rstrip("/")
 
-# Debugowanie zmiennych środowiskowych
 print(f"🔍 LOCUST_HOST: {LOCUST_HOST}")
 print(f"🔍 PUSHGATEWAY_ADDRESS: {PUSHGATEWAY_ADDRESS}")
 
-# Nagłówki symulujące przeglądarkę
 HEADERS = {
     "User-Agent": (
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -35,17 +35,15 @@ HEADERS = {
     )
 }
 
-# Utwórz własny rejestr metryk
+# Tworzymy nowy rejestr metryk (i odpinamy defaultowe)
 registry = CollectorRegistry(auto_describe=False)
-
-# Odczepienie domyślnych kolektorów Prometheus
 for collector in list(REGISTRY._collector_to_names.keys()):
     try:
         REGISTRY.unregister(collector)
     except Exception as e:
         print(f"⚠️ Nie udało się odczepić kolektora: {e}")
 
-# Definicja liczników i histogramu (bez const_labels!)
+# --- Istniejące metryki ---
 REQUEST_SUCCESS_COUNTER = Counter(
     "locust_request_success_total",
     "Total successful requests",
@@ -63,12 +61,26 @@ REQUEST_FAILURE_COUNTER = Counter(
 REQUEST_DURATION_HISTOGRAM = Histogram(
     "locust_request_duration_seconds",
     "Histogram of request durations in seconds",
-    ["instance"],   # Możesz dodać też np. ["instance","method","name"] jeśli chcesz bardziej szczegółowe metryki
+    ["instance"],
     buckets=[0.1, 0.3, 1.5, 10.0],
     registry=registry
 )
 
-# Funkcja do zbierania metryk i zapisu do pliku
+# --- NOWE metryki CPU i RAM ---
+LOCUST_CPU_USAGE_GAUGE = Gauge(
+    "locust_cpu_usage_percent",
+    "CPU usage of the Locust process (percent)",
+    ["instance"],
+    registry=registry
+)
+
+LOCUST_MEMORY_USAGE_GAUGE = Gauge(
+    "locust_memory_usage_bytes",
+    "Memory usage of the Locust process (in bytes)",
+    ["instance"],
+    registry=registry
+)
+
 def collect_metrics_to_file(file_path):
     try:
         print(f"🔍 Próba zapisu metryk do pliku: {file_path}")
@@ -81,7 +93,6 @@ def collect_metrics_to_file(file_path):
     except Exception as e:
         print(f"❌ Błąd przy zbieraniu metryk: {e}")
 
-# Funkcje do pushowania metryk
 def push_metrics_from_file(file_path):
     try:
         print(f"Sprawdzam, czy plik metryk istnieje: {file_path}")
@@ -103,11 +114,28 @@ def push_metrics_from_file(file_path):
     except Exception as e:
         print(f"❌ Błąd przy pushowaniu metryk: {e}")
 
-# Listener dla każdego żądania
+# Funkcja do aktualizacji CPU/RAM
+def update_cpu_ram_metrics():
+    # Odczytujemy aktualny proces (Locust)
+    process = psutil.Process(os.getpid())
+
+    # CPU usage (wartość z cpu_percent() to procent globalny,
+    #   domyślnie liczone od ostatniego wywołania, dlatego
+    #   może być 0.0 jeśli nie minęło wystarczająco czasu)
+    cpu_percent = process.cpu_percent(interval=None)
+
+    # Memory usage (rss)
+    mem_info = process.memory_info()
+    memory_usage = mem_info.rss  # w bajtach
+
+    # Ustawiamy w Gauge
+    LOCUST_CPU_USAGE_GAUGE.labels(instance="locust_jenkins").set(cpu_percent)
+    LOCUST_MEMORY_USAGE_GAUGE.labels(instance="locust_jenkins").set(memory_usage)
+
+# Słuchamy eventu request - w nim będziemy update'ować CPU/RAM
 @events.request.add_listener
 def on_request(request_type, name, response_time, response_length, exception, **kwargs):
-    # Najpierw rejestrujemy czas trwania (tu, tylko per 'instance'),
-    # ale w razie potrzeby możesz dodać 'request_type' lub 'name' do etykiet.
+    # Najpierw rejestrujemy czas trwania
     REQUEST_DURATION_HISTOGRAM.labels(instance="locust_jenkins").observe(response_time / 1000)
 
     if exception is None:
@@ -124,6 +152,9 @@ def on_request(request_type, name, response_time, response_length, exception, **
             response_code="0",
             instance="locust_jenkins"
         ).inc()
+
+    # Aktualizujemy wskaźniki CPU/RAM
+    update_cpu_ram_metrics()
 
 class PracticeLoginScenario(TaskSet):
     @task
