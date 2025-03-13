@@ -122,7 +122,7 @@ def update_cpu_ram_metrics():
     # CPU usage (wartość z cpu_percent() to procent globalny,
     #   domyślnie liczone od ostatniego wywołania, dlatego
     #   może być 0.0 jeśli nie minęło wystarczająco czasu)
-    cpu_percent = process.cpu_percent(interval=None)
+    cpu_percent = process.cpu_percent(interval=0.1)
 
     # Memory usage (rss)
     mem_info = process.memory_info()
