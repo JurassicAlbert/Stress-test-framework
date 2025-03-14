@@ -84,6 +84,7 @@ def run_login_test():
                 y_val = duration
 
                 scenario_name = "positive" if (LOGIN == "student" and PASSWORD == "Password123") else "negative"
+                # Zapisujemy metrykę z etykietami: test_name oraz x_value
                 CLASSIFICATION_2D.labels(test_name=scenario_name, x_value=str(x_num)).set(y_val)
 
                 if scenario_name == "positive":
@@ -115,7 +116,7 @@ def run_login_test():
                             TEST_FAILURE_COUNTER.inc()
                     if y_val < 1000:
                         negative_perf_issues += 1
-            except:
+            except Exception as ex:
                 TEST_FAILURE_COUNTER.inc()
 
         PERFORMANCE_POSITIVE_COUNTER.inc(positive_perf_issues)
@@ -131,12 +132,19 @@ if __name__ == "__main__":
             f.write(metrics_output)
         print("[INFO] Metrics exported to file:", args.metrics_file)
 
+        # Wybieramy nazwę jobu na podstawie nazwy pliku
+        job_name = "playwright_tests"
+        if "negative" in args.metrics_file.lower():
+            job_name = "playwright_tests_negative"
+        elif "positive" in args.metrics_file.lower():
+            job_name = "playwright_tests_positive"
+
         try:
             push_to_gateway(
                 PUSHGATEWAY_ADDRESS,
-                job="playwright_tests",
+                job=job_name,
                 registry=registry
             )
-            print("[INFO] Metrics pushed to Pushgateway at:", PUSHGATEWAY_ADDRESS)
+            print(f"[INFO] Metrics pushed to Pushgateway at: {PUSHGATEWAY_ADDRESS} with job: {job_name}")
         except Exception as e:
             print("[ERROR] Failed to push metrics:", e)
