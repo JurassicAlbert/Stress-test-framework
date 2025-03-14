@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
 import os
-import sys
 import time
 import argparse
 from playwright.sync_api import sync_playwright
@@ -22,8 +21,7 @@ LOGIN = os.getenv("LOGIN", "student")
 PASSWORD = os.getenv("PASSWORD", "Password123")
 PUSHGATEWAY_ADDRESS = os.getenv("PUSHGATEWAY_ADDRESS", "localhost:9091").rstrip("/")
 
-# Limit czasu (w sekundach), po przekroczeniu którego
-# pozytywny test uznajemy za nieoczekiwane niepowodzenie.
+# Limit czasu (w sekundach) – dla pozytywnych testów
 MAX_DURATION = 3.9
 
 # Rejestr do Prometheusa
@@ -73,51 +71,40 @@ def run_login_test():
                 current_url = page.url
 
                 # Rozpoznajemy scenariusz (positive/negative)
-                scenario_name = "positive" if (LOGIN == "student" and PASSWORD == "Password123") else "negative"
+                scenario = "positive" if (LOGIN == "student" and PASSWORD == "Password123") else "negative"
 
-                if scenario_name == "positive":
-                    # Oczekujemy poprawnego logowania
-                    # (URL zawiera "logged-in-successfully" + ewentualny tekst w content)
+                if scenario == "positive":
+                    # Pozytywny scenariusz: oczekujemy, że użytkownik zostanie zalogowany
                     if "logged-in-successfully" in current_url:
-                        # Dodatkowo sprawdzamy treść strony
                         content = page.content()
-                        if "Logged In Successfully" in content or "Congratulations" in content:
+                        if ("Logged In Successfully" in content or "Congratulations" in content):
                             # Sprawdzamy wylogowanie
                             page.click("text=Log out")
                             time.sleep(0.2)
                             if "practice-test-login" in page.url:
-                                # Test teoretycznie "passed"
-                                # Sprawdzamy jednak limit czasu
+                                # Jeśli czas jest w normie, test "przeszedł"
                                 if duration <= MAX_DURATION:
                                     TEST_PASSED_COUNTER.inc()
                                 else:
-                                    # Przekroczony limit => nieoczekiwane niepowodzenie
-                                    TEST_FAILED_COUNTER.inc()
+                                    # Jeśli trwa za długo – tylko nieoczekiwane niepowodzenie
                                     TEST_POSITIVE_UNEXPECTED_FAIL_COUNTER.inc()
                             else:
-                                # Nie udało się wylogować => fail
-                                TEST_FAILED_COUNTER.inc()
                                 TEST_POSITIVE_UNEXPECTED_FAIL_COUNTER.inc()
                         else:
-                            # URL był ok, ale brak odpowiedniego tekstu => fail
-                            TEST_FAILED_COUNTER.inc()
                             TEST_POSITIVE_UNEXPECTED_FAIL_COUNTER.inc()
                     else:
-                        # Nie ma "logged-in-successfully" => fail
-                        TEST_FAILED_COUNTER.inc()
                         TEST_POSITIVE_UNEXPECTED_FAIL_COUNTER.inc()
 
                 else:
-                    # scenario_name == "negative"
-                    # Oczekujemy błędnego logowania
+                    # Negatywny scenariusz: oczekujemy błędnego logowania (czyli nie zalogowania się)
                     if "logged-in-successfully" in current_url:
-                        # Użytkownik się zalogował => to nieoczekiwany pass
+                        # Użytkownik zalogował się nieoczekiwanie
                         TEST_NEGATIVE_UNEXPECTED_PASS_COUNTER.inc()
                     else:
+                        # Test negatywny – niezależnie od czasu, zwiększamy tylko TEST_FAILED_COUNTER
                         TEST_FAILED_COUNTER.inc()
 
             except Exception:
-                # Każdy błąd w trakcie testu => fail (nie przerywamy pipeline)
                 TEST_FAILED_COUNTER.inc()
 
         browser.close()
@@ -126,7 +113,6 @@ def run_login_test():
 if __name__ == "__main__":
     run_login_test()
 
-    # Eksport metryk (jeśli podano --export-metrics)
     if args.export_metrics:
         metrics_output = generate_latest(registry).decode("utf-8")
         with open(args.metrics_file, "w", encoding="utf-8") as f:
