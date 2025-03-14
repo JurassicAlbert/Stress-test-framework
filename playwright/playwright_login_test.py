@@ -22,7 +22,7 @@ PASSWORD = os.getenv("PASSWORD", "Password123")
 PUSHGATEWAY_ADDRESS = os.getenv("PUSHGATEWAY_ADDRESS", "localhost:9091").rstrip("/")
 
 # Limit czasu (w sekundach) – dla pozytywnych testów
-MAX_DURATION = 3.9
+MAX_DURATION = 3.8
 
 # Rejestr do Prometheusa
 registry = CollectorRegistry()
