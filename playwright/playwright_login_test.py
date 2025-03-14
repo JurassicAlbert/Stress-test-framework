@@ -5,150 +5,135 @@ import time
 import argparse
 from playwright.sync_api import sync_playwright
 from prometheus_client import (
-    CollectorRegistry, Counter, Gauge, Histogram, generate_latest, push_to_gateway
+    CollectorRegistry, Counter, generate_latest, push_to_gateway
 )
 from colorama import init
 
 init(autoreset=True)
+
 parser = argparse.ArgumentParser()
 parser.add_argument("--export-metrics", action="store_true")
 parser.add_argument("--metrics-file", type=str, default="playwright_metrics.txt")
 args = parser.parse_args()
 
+# Ustawienia z ENV lub domyślne
 NUM_TESTS = int(os.getenv("NUM_TESTS", 1))
 LOGIN = os.getenv("LOGIN", "student")
 PASSWORD = os.getenv("PASSWORD", "Password123")
 PUSHGATEWAY_ADDRESS = os.getenv("PUSHGATEWAY_ADDRESS", "localhost:9091").rstrip("/")
 
+# Limit czasu (w sekundach), po przekroczeniu którego
+# pozytywny test uznajemy za nieoczekiwane niepowodzenie.
+MAX_DURATION = 4.0
+
+# Rejestr do Prometheusa
 registry = CollectorRegistry()
 
-# Liczniki główne
-TEST_SUCCESS_COUNTER = Counter(
-    "playwright_test_success_total",
-    "Total number of successful Playwright tests",
+# ========== METRYKI ==========
+TEST_PASSED_COUNTER = Counter(
+    "playwright_test_passed_total",
+    "Total number of tests that passed as expected",
     registry=registry
 )
-TEST_FAILURE_COUNTER = Counter(
-    "playwright_test_failure_total",
-    "Total number of failed Playwright tests",
+TEST_FAILED_COUNTER = Counter(
+    "playwright_test_failed_total",
+    "Total number of tests that failed (unexpected outcome)",
     registry=registry
 )
-# Dodatkowe liczniki dla specyficznych przypadków
-PERFORMANCE_POSITIVE_COUNTER = Counter(
-    "playwright_positive_performance_failures_total",
-    "Total number of positive tests that exceeded the expected duration threshold",
+TEST_NEGATIVE_UNEXPECTED_PASS_COUNTER = Counter(
+    "playwright_test_negative_unexpected_pass_total",
+    "Total negative tests that unexpectedly passed",
     registry=registry
 )
-PERFORMANCE_NEGATIVE_COUNTER = Counter(
-    "playwright_negative_performance_unexpected_pass_total",
-    "Total number of negative tests that unexpectedly passed or had a very short duration",
+TEST_POSITIVE_UNEXPECTED_FAIL_COUNTER = Counter(
+    "playwright_test_positive_unexpected_fail_total",
+    "Total positive tests that unexpectedly failed",
     registry=registry
 )
-POSITIVE_EXPECTED_PASS = Counter(
-    "playwright_positive_performance_expected_pass_total",
-    "Total positive tests that passed as expected",
-    registry=registry
-)
-NEGATIVE_EXPECTED_FAIL = Counter(
-    "playwright_negative_performance_expected_fail_total",
-    "Total negative tests that failed as expected",
-    registry=registry
-)
-
-# Nowa metryka – licznik testów uruchomionych
-TEST_ATTEMPT_COUNTER = Counter(
-    "playwright_test_attempt_total",
-    "Total number of attempted Playwright tests",
-    registry=registry
-)
-
-# Histogram czasu trwania testu (w sekundach)
-TEST_DURATION_HISTOGRAM = Histogram(
-    "playwright_test_duration_seconds",
-    "Histogram of Playwright test durations in seconds",
-    buckets=[0.5, 1, 2, 4, 8],
-    registry=registry
-)
-
-# Przykładowa metryka 2D (oryginalna)
-CLASSIFICATION_2D = Gauge(
-    "playwright_classification_2d",
-    "2D data from test scenario (X->value=Y)",
-    ["test_name", "x_value"],
-    registry=registry
-)
+# =============================
 
 def run_login_test():
-    positive_perf_issues = 0
-    negative_perf_issues = 0
-
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
         context = browser.new_context()
         page = context.new_page()
 
-        for i in range(NUM_TESTS):
-            TEST_ATTEMPT_COUNTER.inc()  # Zwiększenie licznika prób testów
-            iteration_start = time.time()
+        for _ in range(NUM_TESTS):
+            start_time = time.time()
+
             try:
+                # Przechodzimy do strony logowania
                 page.goto("https://practicetestautomation.com/practice-test-login/")
                 page.fill("#username", LOGIN)
                 page.fill("#password", PASSWORD)
                 page.click("#submit")
                 time.sleep(0.2)
+
+                duration = time.time() - start_time
                 current_url = page.url
 
-                x_num = i * 10
-                duration = time.time() - iteration_start
-                # Rejestracja czasu trwania testu
-                TEST_DURATION_HISTOGRAM.observe(duration)
-                # Ustawiamy wartość metryki 2D
-                CLASSIFICATION_2D.labels(test_name="positive" if (LOGIN=="student" and PASSWORD=="Password123") else "negative",
-                                          x_value=str(x_num)).set(duration * 1000)  # zapis w ms
-
+                # Rozpoznajemy scenariusz (positive/negative)
                 scenario_name = "positive" if (LOGIN == "student" and PASSWORD == "Password123") else "negative"
+
                 if scenario_name == "positive":
-                    if "logged-in-successfully" not in current_url:
-                        TEST_FAILURE_COUNTER.inc()
-                        PERFORMANCE_POSITIVE_COUNTER.inc()  # Nieoczekiwane niepowodzenie
-                    else:
+                    # Oczekujemy poprawnego logowania
+                    # (URL zawiera "logged-in-successfully" + ewentualny tekst w content)
+                    if "logged-in-successfully" in current_url:
+                        # Dodatkowo sprawdzamy treść strony
                         content = page.content()
-                        if not ("Logged In Successfully" in content or "Congratulations" in content):
-                            TEST_FAILURE_COUNTER.inc()
-                            PERFORMANCE_POSITIVE_COUNTER.inc()
-                        else:
+                        if "Logged In Successfully" in content or "Congratulations" in content:
+                            # Sprawdzamy wylogowanie
                             page.click("text=Log out")
                             time.sleep(0.2)
-                            if "practice-test-login" not in page.url:
-                                TEST_FAILURE_COUNTER.inc()
-                                PERFORMANCE_POSITIVE_COUNTER.inc()
+                            if "practice-test-login" in page.url:
+                                # Test teoretycznie "passed"
+                                # Sprawdzamy jednak limit czasu
+                                if duration <= MAX_DURATION:
+                                    TEST_PASSED_COUNTER.inc()
+                                else:
+                                    # Przekroczony limit => nieoczekiwane niepowodzenie
+                                    TEST_FAILED_COUNTER.inc()
+                                    TEST_POSITIVE_UNEXPECTED_FAIL_COUNTER.inc()
                             else:
-                                TEST_SUCCESS_COUNTER.inc()
-                                POSITIVE_EXPECTED_PASS.inc()
-                    if duration > 4:
-                        positive_perf_issues += 1
-                else:
-                    if "logged-in-successfully" in current_url:
-                        TEST_FAILURE_COUNTER.inc()
-                        PERFORMANCE_NEGATIVE_COUNTER.inc()  # Nieoczekiwane przejście
+                                # Nie udało się wylogować => fail
+                                TEST_FAILED_COUNTER.inc()
+                                TEST_POSITIVE_UNEXPECTED_FAIL_COUNTER.inc()
+                        else:
+                            # URL był ok, ale brak odpowiedniego tekstu => fail
+                            TEST_FAILED_COUNTER.inc()
+                            TEST_POSITIVE_UNEXPECTED_FAIL_COUNTER.inc()
                     else:
+                        # Nie ma "logged-in-successfully" => fail
+                        TEST_FAILED_COUNTER.inc()
+                        TEST_POSITIVE_UNEXPECTED_FAIL_COUNTER.inc()
+
+                else:
+                    # scenario_name == "negative"
+                    # Oczekujemy błędnego logowania
+                    if "logged-in-successfully" in current_url:
+                        # Użytkownik się zalogował => to nieoczekiwany pass
+                        TEST_FAILED_COUNTER.inc()
+                        TEST_NEGATIVE_UNEXPECTED_PASS_COUNTER.inc()
+                    else:
+                        # Sprawdzamy czy pojawił się komunikat o błędzie
                         error_text = page.text_content("#error")
                         if error_text and ("Your username is invalid!" in error_text or "Your password is invalid!" in error_text):
-                            TEST_SUCCESS_COUNTER.inc()
-                            NEGATIVE_EXPECTED_FAIL.inc()
+                            # To jest oczekiwane zachowanie => test "passed"
+                            TEST_PASSED_COUNTER.inc()
                         else:
-                            TEST_FAILURE_COUNTER.inc()
-                    if duration < 1:
-                        negative_perf_issues += 1
-            except Exception as ex:
-                TEST_FAILURE_COUNTER.inc()
-        PERFORMANCE_POSITIVE_COUNTER.inc(positive_perf_issues)
-        PERFORMANCE_NEGATIVE_COUNTER.inc(negative_perf_issues)
+                            # Brak komunikatu => fail
+                            TEST_FAILED_COUNTER.inc()
+
+            except Exception:
+                # Każdy błąd w trakcie testu => fail (nie przerywamy pipeline)
+                TEST_FAILED_COUNTER.inc()
+
         browser.close()
 
 if __name__ == "__main__":
     run_login_test()
 
+    # Eksport metryk (jeśli podano --export-metrics)
     if args.export_metrics:
         metrics_output = generate_latest(registry).decode("utf-8")
         with open(args.metrics_file, "w", encoding="utf-8") as f:
