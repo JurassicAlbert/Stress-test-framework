@@ -4,7 +4,9 @@ import sys
 import time
 import argparse
 from playwright.sync_api import sync_playwright
-from prometheus_client import CollectorRegistry, Counter, Gauge, generate_latest
+from prometheus_client import (
+    CollectorRegistry, Counter, Gauge, generate_latest, push_to_gateway
+)
 from colorama import init
 
 init(autoreset=True)
@@ -16,7 +18,8 @@ args = parser.parse_args()
 NUM_TESTS = int(os.getenv("NUM_TESTS", 1))
 LOGIN = os.getenv("LOGIN", "student")
 PASSWORD = os.getenv("PASSWORD", "Password123")
-PUSHGATEWAY_ADDRESS = os.getenv("PUSHGATEWAY_ADDRESS", "localhost:9091")
+PUSHGATEWAY_ADDRESS = os.getenv("PUSHGATEWAY_ADDRESS", "localhost:9091").rstrip("/")
+
 registry = CollectorRegistry()
 
 TEST_SUCCESS_COUNTER = Counter(
@@ -50,9 +53,6 @@ NEGATIVE_EXPECTED_FAIL = Counter(
     registry=registry
 )
 
-# NOWY gauge do przechowywania punktów 2D
-# x_value - przechowujemy "X" jako label (string),
-# test_name - label do rozróżniania serii
 CLASSIFICATION_2D = Gauge(
     "playwright_classification_2d",
     "2D data from test scenario (X->value=Y)",
@@ -79,22 +79,14 @@ def run_login_test():
                 time.sleep(0.2)
                 current_url = page.url
 
-                # PRZYKŁAD: Sztucznie generujemy X i Y
-                # X = numer iteracji * 10
-                # Y = zmierzony "duration" w milisekundach
                 x_num = i * 10
                 duration = (time.time() * 1000) - iteration_start
                 y_val = duration
 
-                # Ustawiamy w GAUGE:
-                # test_name = "positive" lub "negative"
-                # x_value = str(x_num)
-                # value = y_val
                 scenario_name = "positive" if (LOGIN == "student" and PASSWORD == "Password123") else "negative"
                 CLASSIFICATION_2D.labels(test_name=scenario_name, x_value=str(x_num)).set(y_val)
 
                 if scenario_name == "positive":
-                    # Dotychczasowa logika
                     if "logged-in-successfully" not in current_url:
                         TEST_FAILURE_COUNTER.inc()
                     else:
@@ -112,7 +104,6 @@ def run_login_test():
                     if y_val > 4000:
                         positive_perf_issues += 1
                 else:
-                    # negative scenario
                     if "logged-in-successfully" in current_url:
                         TEST_FAILURE_COUNTER.inc()
                     else:
@@ -139,3 +130,13 @@ if __name__ == "__main__":
         with open(args.metrics_file, "w", encoding="utf-8") as f:
             f.write(metrics_output)
         print("[INFO] Metrics exported to file:", args.metrics_file)
+
+        try:
+            push_to_gateway(
+                PUSHGATEWAY_ADDRESS,
+                job="playwright_tests",
+                registry=registry
+            )
+            print("[INFO] Metrics pushed to Pushgateway at:", PUSHGATEWAY_ADDRESS)
+        except Exception as e:
+            print("[ERROR] Failed to push metrics:", e)
