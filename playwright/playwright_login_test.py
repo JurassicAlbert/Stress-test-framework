@@ -24,7 +24,7 @@ PUSHGATEWAY_ADDRESS = os.getenv("PUSHGATEWAY_ADDRESS", "localhost:9091").rstrip(
 
 # Limit czasu (w sekundach), po przekroczeniu którego
 # pozytywny test uznajemy za nieoczekiwane niepowodzenie.
-MAX_DURATION = 4.0
+MAX_DURATION = 3.9
 
 # Rejestr do Prometheusa
 registry = CollectorRegistry()
@@ -112,23 +112,16 @@ def run_login_test():
                     # Oczekujemy błędnego logowania
                     if "logged-in-successfully" in current_url:
                         # Użytkownik się zalogował => to nieoczekiwany pass
-                        TEST_FAILED_COUNTER.inc()
                         TEST_NEGATIVE_UNEXPECTED_PASS_COUNTER.inc()
                     else:
-                        # Sprawdzamy czy pojawił się komunikat o błędzie
-                        error_text = page.text_content("#error")
-                        if error_text and ("Your username is invalid!" in error_text or "Your password is invalid!" in error_text):
-                            # To jest oczekiwane zachowanie => test "passed"
-                            TEST_PASSED_COUNTER.inc()
-                        else:
-                            # Brak komunikatu => fail
-                            TEST_FAILED_COUNTER.inc()
+                        TEST_FAILED_COUNTER.inc()
 
             except Exception:
                 # Każdy błąd w trakcie testu => fail (nie przerywamy pipeline)
                 TEST_FAILED_COUNTER.inc()
 
         browser.close()
+
 
 if __name__ == "__main__":
     run_login_test()
