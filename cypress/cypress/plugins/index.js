@@ -1,30 +1,29 @@
-// index.js
-
 const fs = require('fs');
 const http = require('http');
 const client = require('prom-client');
 
-// Odczyt scenariusza z ENV, np. "negative", "positive" lub inny (generic)
+// Odczyt scenariusza z ENV: "positive", "negative" lub "generic"
 const scenario = process.env.SCENARIO || 'generic';
 
 // Konfiguracja rejestru metryk z domyślnymi etykietami
 const registry = new client.Registry();
 registry.setDefaultLabels({
-  instance: scenario === 'positive'
-    ? 'cypress_jenkins_positive'
-    : scenario === 'negative'
-      ? 'cypress_jenkins_negative'
-      : 'cypress_jenkins'
+  instance:
+    scenario === 'positive'
+      ? 'cypress_jenkins_positive'
+      : scenario === 'negative'
+        ? 'cypress_jenkins_negative'
+        : 'cypress_jenkins'
 });
 
-// Definicja liczników – w zależności od scenariusza
+// Definicja liczników w zależności od scenariusza
 let TEST_PASSED_COUNTER;
 let TEST_POSITIVE_UNEXPECTED_FAIL_COUNTER;
 let TEST_FAILED_COUNTER;
 let TEST_NEGATIVE_UNEXPECTED_PASS_COUNTER;
 
 if (scenario === 'positive') {
-  // Dla testów, które powinny przejść – nie potrzebujemy metryk dla negatywnych
+  // Testy, które mają przejść – oczekujemy, że wynik "expectedPass" > 0, a "unexpectedFail" = 0
   TEST_PASSED_COUNTER = new client.Counter({
     name: 'cypress_test_passed_total',
     help: 'Total number of positive tests that passed as expected',
@@ -36,7 +35,7 @@ if (scenario === 'positive') {
     registers: [registry],
   });
 } else if (scenario === 'negative') {
-  // Dla testów, które powinny failować – nie potrzebujemy metryki dla sukcesów
+  // Testy, które mają sfailować – oczekujemy, że wynik "expectedFail" > 0, a "unexpectedPass" = 0
   TEST_FAILED_COUNTER = new client.Counter({
     name: 'cypress_test_failed_total',
     help: 'Total number of negative tests that failed as expected',
@@ -48,7 +47,7 @@ if (scenario === 'positive') {
     registers: [registry],
   });
 } else {
-  // W przypadku scenariusza ogólnego – definiujemy wszystkie metryki
+  // Scenariusz generic – definiujemy wszystkie liczniki
   TEST_PASSED_COUNTER = new client.Counter({
     name: 'cypress_test_passed_total',
     help: 'Total number of positive tests that passed as expected',
@@ -74,38 +73,33 @@ if (scenario === 'positive') {
 // Funkcja zapisująca metryki do pliku
 async function collectMetricsToFile(filePath) {
   try {
-    console.log('>>> Próba zapisu metryk do pliku:', filePath);
+    console.log('>>> Writing metrics to file:', filePath);
     const metrics = await registry.metrics();
     fs.writeFileSync(filePath, metrics);
-    console.log('✅ Metryki zapisane do pliku:', filePath);
-    if (fs.existsSync(filePath)) {
-      console.log('✅ Plik metryk istnieje:', filePath);
-    } else {
-      console.error('❌ Plik metryk NIE został utworzony!');
-    }
+    console.log('✅ Metrics written to file:', filePath);
   } catch (err) {
-    console.error('❌ Błąd przy zapisywaniu metryk do pliku:', err);
+    console.error('❌ Error writing metrics to file:', err);
   }
 }
 
-// Funkcja wyświetlająca metryki z pliku w konsoli
+// Funkcja wyświetlająca metryki z pliku
 function displayMetricsFromFile(filePath) {
   try {
-    console.log('>>> Próba odczytu metryk z pliku:', filePath);
+    console.log('>>> Reading metrics from file:', filePath);
     const data = fs.readFileSync(filePath, 'utf8');
-    console.log('✅ Metryki odczytane z pliku:\n', data);
+    console.log('✅ Metrics read from file:\n', data);
   } catch (err) {
-    console.error('❌ Błąd przy odczycie pliku z metrykami:', err);
+    console.error('❌ Error reading metrics file:', err);
   }
 }
 
 // Funkcja pushująca metryki do Pushgateway
 function pushMetricsFromFile(filePath, pushgatewayUrl, jobName, groupingKey) {
   try {
-    console.log('>>> Próba pushowania metryk z pliku:', filePath);
-    console.log(`>>> Wysyłanie metryk do: ${pushgatewayUrl}`);
+    console.log('>>> Pushing metrics from file:', filePath);
+    console.log(`>>> Sending metrics to: ${pushgatewayUrl}`);
     if (!fs.existsSync(filePath)) {
-      console.error('❌ Plik metryk nie istnieje! Pushowanie anulowane.');
+      console.error('❌ Metrics file does not exist! Aborting push.');
       return;
     }
     const metricsData = fs.readFileSync(filePath, 'utf8');
@@ -132,20 +126,20 @@ function pushMetricsFromFile(filePath, pushgatewayUrl, jobName, groupingKey) {
         responseData += chunk;
       });
       res.on('end', () => {
-        console.log('✅ Odpowiedź Pushgateway:', res.statusCode, responseData);
+        console.log('✅ Pushgateway response:', res.statusCode, responseData);
       });
     });
     req.on('error', (err) => {
-      console.error('❌ Błąd przy wysyłaniu metryk:', err);
+      console.error('❌ Error pushing metrics:', err);
     });
     req.write(metricsData);
     req.end();
   } catch (err) {
-    console.error('❌ Błąd przy odczycie pliku z metrykami do wysyłki:', err);
+    console.error('❌ Error during metrics push:', err);
   }
 }
 
-// Ustalanie jobName oraz instanceName w zależności od scenariusza
+// Ustalanie jobName oraz instanceName na podstawie scenariusza
 let jobName = 'cypress_tests';
 let instanceName = 'cypress_jenkins';
 if (scenario === 'negative') {
@@ -156,19 +150,22 @@ if (scenario === 'negative') {
   instanceName = 'cypress_jenkins_positive';
 }
 
+// Funkcja odczytująca wyniki testów z pliku JSON.
+// Plik "cypress_results.json" powinien być wygenerowany przez Cypress i zawierać odpowiednie pola:
+// dla scenariusza "positive": { "expectedPass": <number>, "unexpectedFail": <number> }
+// dla scenariusza "negative": { "expectedFail": <number>, "unexpectedPass": <number> }
+// dla generic: wszystkie cztery.
+function readResultsFromFile(filePath) {
+  try {
+    const data = fs.readFileSync(filePath, 'utf8');
+    return JSON.parse(data);
+  } catch (err) {
+    console.error('❌ Error reading test results file:', err);
+    return null;
+  }
+}
+
 // Aktualizacja metryk na podstawie wyników testów
-// Zakładamy, że wyniki testów są zapisane w pliku 'cypress_results.json'
-// Dla scenariusza pozytywnego oczekujemy formatu:
-// {
-//   "expectedPass": <number>,
-//   "unexpectedFail": <number>
-// }
-// Dla scenariusza negatywnego:
-// {
-//   "expectedFail": <number>,
-//   "unexpectedPass": <number>
-// }
-// W scenariuszu generic aktualizowane są wszystkie cztery metryki.
 function updateMetricsFromResults(results) {
   if (scenario === 'positive') {
     TEST_PASSED_COUNTER.inc(results.expectedPass || 0);
@@ -184,34 +181,23 @@ function updateMetricsFromResults(results) {
   }
 }
 
-// Funkcja odczytująca wyniki testów z pliku JSON
-function readResultsFromFile(filePath) {
-  try {
-    const data = fs.readFileSync(filePath, 'utf8');
-    return JSON.parse(data);
-  } catch (err) {
-    console.error('❌ Błąd przy odczycie wyników testów z pliku:', err);
-    return null;
-  }
-}
-
-// Główna funkcja – aktualizuje metryki, zapisuje je do pliku, wyświetla oraz pushuje do Pushgateway
+// Główna funkcja: odczytuje wyniki, aktualizuje liczniki, zapisuje metryki do pliku, wyświetla je i pushuje do Pushgateway.
 (async () => {
-  console.log('>>> Aktualizacja liczników Cypress na podstawie wyników testów...');
-  const resultsFile = 'cypress_results.json';
+  console.log('>>> Updating Cypress metrics based on test results...');
+  const resultsFile = '../results/cypress_results.json';
   const results = readResultsFromFile(resultsFile);
   if (results) {
     updateMetricsFromResults(results);
   } else {
-    console.error('❌ Brak wyników testów – metryki nie zostały zaktualizowane.');
+    console.error('❌ No test results – metrics not updated.');
   }
 
-  // Wybór pliku metryk w zależności od scenariusza
-  const filePath = scenario === 'positive'
-    ? 'cypress_metrics_positive.txt'
-    : scenario === 'negative'
-      ? 'cypress_metrics_negative.txt'
-      : 'cypress_metrics.txt';
+  const filePath =
+    scenario === 'positive'
+      ? 'cypress_metrics_positive.txt'
+      : scenario === 'negative'
+        ? 'cypress_metrics_negative.txt'
+        : 'cypress_metrics.txt';
 
   const pushgatewayUrl = process.env.PUSHGATEWAY_ADDRESS || 'http://localhost:9091';
   await collectMetricsToFile(filePath);
