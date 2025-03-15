@@ -2,6 +2,9 @@ const fs = require('fs');
 const http = require('http');
 const client = require('prom-client');
 
+// Odczyt scenariusza z ENV, np. "negative", "positive" lub brak
+const scenario = process.env.SCENARIO || 'generic';
+
 // Konfiguracja rejestru metryk
 const registry = new client.Registry();
 registry.setDefaultLabels({ instance: 'cypress_jenkins' });
@@ -28,12 +31,6 @@ const performanceNegativeCounter = new client.Counter({
     help: 'Total number of negative tests that unexpectedly passed or had a very short duration',
     registers: [registry],
 });
-
-// Inicjalizacja liczników
-testSuccessCounter.inc(0);
-testFailureCounter.inc(0);
-performancePositiveCounter.inc(0);
-performanceNegativeCounter.inc(0);
 
 const testDurationHistogram = new client.Histogram({
     name: 'cypress_test_duration_seconds',
@@ -122,21 +119,63 @@ function pushMetricsFromFile(filePath, pushgatewayUrl, jobName, groupingKey) {
     }
 }
 
-// Symulacja aktualizacji metryk, zapis, wyświetlenie i push do Pushgateway
+// Ustalanie jobName i instanceName w zależności od scenariusza
+let jobName = 'cypress_tests';
+let instanceName = 'cypress_jenkins';
+
+if (scenario === 'negative') {
+    jobName = 'cypress_tests_negative';
+    instanceName = 'cypress_jenkins_negative';
+} else if (scenario === 'positive') {
+    jobName = 'cypress_tests_positive';
+    instanceName = 'cypress_jenkins_positive';
+}
+
+// Aktualizacja metryk na podstawie wyników testów
+// Zakładamy, że wyniki testów są zapisane w pliku 'cypress_results.json'
+// Format pliku JSON powinien być następujący:
+// {
+//   "success": <number>,
+//   "failure": <number>,
+//   "duration": <number>,
+//   "performancePositive": <number>,
+//   "performanceNegative": <number>
+// }
+function updateMetricsFromResults(results) {
+    testSuccessCounter.inc(results.success);
+    testFailureCounter.inc(results.failure);
+    testDurationHistogram.observe(results.duration);
+    performancePositiveCounter.inc(results.performancePositive);
+    performanceNegativeCounter.inc(results.performanceNegative);
+}
+
+// Funkcja odczytująca wyniki testów z pliku JSON
+function readResultsFromFile(filePath) {
+    try {
+        const data = fs.readFileSync(filePath, 'utf8');
+        return JSON.parse(data);
+    } catch (err) {
+        console.error('❌ Błąd przy odczycie wyników testów z pliku:', err);
+        return null;
+    }
+}
+
 (async () => {
-    console.log('>>> Aktualizacja liczników Cypress...');
-    testSuccessCounter.inc(3);
-    testFailureCounter.inc(1);
-    testDurationHistogram.observe(2.34);
-    performancePositiveCounter.inc(1);
-    performanceNegativeCounter.inc(0);
+    console.log('>>> Aktualizacja liczników Cypress na podstawie wyników testów...');
+    const resultsFile = 'cypress_results.json';
+    const results = readResultsFromFile(resultsFile);
+    if (results) {
+        updateMetricsFromResults(results);
+    } else {
+        console.error('❌ Brak wyników testów – metryki nie zostały zaktualizowane.');
+    }
 
     const filePath = 'cypress_metrics.txt';
     const pushgatewayUrl = process.env.PUSHGATEWAY_ADDRESS || 'http://localhost:9091';
-    const jobName = 'cypress_tests';
-    const groupingKey = { instance: 'cypress_jenkins' };
 
     await collectMetricsToFile(filePath);
     displayMetricsFromFile(filePath);
-    pushMetricsFromFile(filePath, pushgatewayUrl, jobName, groupingKey);
+
+    // Push z uwzględnieniem jobName i instanceName
+    pushMetricsFromFile(filePath, pushgatewayUrl, jobName, { instance: instanceName });
 })();
