@@ -8,7 +8,8 @@ const scenario = process.env.SCENARIO || 'generic';
 // Konfiguracja rejestru metryk
 const registry = new client.Registry();
 registry.setDefaultLabels({ instance: 'cypress_jenkins' });
-client.collectDefaultMetrics({ register: registry });
+// Przechwyć funkcję do czyszczenia interwału zbierania metryk
+const clearMetricsInterval = client.collectDefaultMetrics({ register: registry });
 
 // Definicja liczników oraz histogramu
 const testSuccessCounter = new client.Counter({
@@ -178,4 +179,7 @@ function readResultsFromFile(filePath) {
 
     // Push z uwzględnieniem jobName i instanceName
     pushMetricsFromFile(filePath, pushgatewayUrl, jobName, { instance: instanceName });
+
+    // Czyszczenie interwału, aby proces zakończył się szybciej
+    clearInterval(clearMetricsInterval);
 })();
