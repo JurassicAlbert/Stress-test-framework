@@ -60,6 +60,6 @@ describe("Practice Test Automation - Login Test", () => {
 
   // Po zakończeniu testów zapisz wyniki do pliku JSON
   after(() => {
-    cy.writeFile('./results/cypress_results.json', testResults);
+    cy.writeFile('./results/cypress_results.json', testResults, {flag: 'a'});
   });
 });

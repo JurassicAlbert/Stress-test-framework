@@ -184,7 +184,7 @@ function updateMetricsFromResults(results) {
 // Główna funkcja: odczytuje wyniki, aktualizuje liczniki, zapisuje metryki do pliku, wyświetla je i pushuje do Pushgateway.
 (async () => {
   console.log('>>> Updating Cypress metrics based on test results...');
-  const resultsFile = '../results/cypress_results.json';
+  const resultsFile = '../../results/cypress_results.json';
   const results = readResultsFromFile(resultsFile);
   if (results) {
     updateMetricsFromResults(results);
